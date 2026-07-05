@@ -1,0 +1,6 @@
+paid_on,total_received,transaction_id,description,customer,currency
+2026-06-02,100.00,INV-001,Bank transfer,Acme Ltd,USD
+2026-06-04,250.00,INV-002,Bank transfer,Blue Company,USD
+2026-06-05,72.50,INV-003,Payment less fee,Delta Studio,USD
+2026-06-09,500.00,INV-004,Bank deposit,Orbit Labs,USD
+2026-06-12,999.00,UNKNOWN-999,Unknown deposit,Unknown,USD

@@ -1,0 +1,6 @@
+Paid On,Total Received,Transaction ID,Description,Customer,Currency
+2026-06-22,100.00,TX-VALID,Valid payment,Ada,usd
+2026-06-22,not-an-amount,TX-BAD-AMOUNT,Bad amount,Bea,USD
+not-a-date,75.00,TX-BAD-DATE,Bad date,Cam,USD
+2026-06-22,50.00,,Missing reference,Dan,USD
+,,,,,

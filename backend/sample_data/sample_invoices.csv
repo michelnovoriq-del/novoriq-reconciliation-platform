@@ -1,0 +1,6 @@
+date,amount,reference,description,customer_name,currency
+2026-06-01,100.00,INV-001,Invoice payment,Acme Ltd,USD
+2026-06-03,250.00,INV-002,Invoice payment,Blue Co,USD
+2026-06-05,75.50,INV-003,Invoice payment,Delta Studio,USD
+2026-06-07,500.00,INV-004,Invoice payment,Orbit Labs,USD
+2026-06-10,120.00,INV-005,Invoice payment,Northwind,USD
