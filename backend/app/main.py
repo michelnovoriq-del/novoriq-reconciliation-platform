@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import auth, files, health, match_results, reconciliation_runs
+from app.config import get_settings
+from app.routes import account, auth, billing, files, health, match_results, reconciliation_runs, webhooks
 
 
 app = FastAPI(
@@ -25,6 +26,16 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(account.router)
+app.include_router(billing.router)
 app.include_router(files.router)
 app.include_router(reconciliation_runs.router)
 app.include_router(match_results.router)
+app.include_router(webhooks.router)
+
+
+@app.on_event("startup")
+def validate_production_configuration() -> None:
+    settings = get_settings()
+    if settings.app_environment.lower() == "production":
+        settings.validate_whop_startup()

@@ -28,7 +28,11 @@ export default function LoginPage() {
   async function onSubmit(values: FormValues) {
     setError("");
     try {
-      await login(values);
+      const returnTo =
+        typeof window === "undefined"
+          ? undefined
+          : new URLSearchParams(window.location.search).get("returnTo") ?? undefined;
+      await login(values, returnTo);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not login.");
     }

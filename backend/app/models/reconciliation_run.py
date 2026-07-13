@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +24,9 @@ class ReconciliationRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("uploaded_files.id"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(50), default="created", nullable=False)
+    retention_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    data_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     organization: Mapped["Organization"] = relationship(
         "Organization", back_populates="reconciliation_runs"
@@ -33,5 +37,5 @@ class ReconciliationRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     file_a: Mapped["UploadedFile"] = relationship("UploadedFile", foreign_keys=[file_a_id])
     file_b: Mapped["UploadedFile"] = relationship("UploadedFile", foreign_keys=[file_b_id])
     match_results: Mapped[list["MatchResult"]] = relationship(
-        "MatchResult", back_populates="reconciliation_run"
+        "MatchResult", back_populates="reconciliation_run", cascade="all, delete-orphan"
     )

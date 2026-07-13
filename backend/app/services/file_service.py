@@ -1,32 +1,37 @@
 import logging
-import shutil
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import NormalizedRecord, Organization, RejectedRecord, UploadedFile, User
+from app.models import NormalizedRecord, Organization, ReconciliationRun, RejectedRecord, UploadedFile, User
+from app.models.base import utc_now
 from app.schemas.file import ColumnMapping
 from app.schemas.rejected_record import RejectedRecordListResponse
 from app.services.audit_service import create_audit_log
+from app.services.entitlement_service import can_process_rows, can_upload_file
 from app.services.normalizer_service import RowNormalizationError, normalize_row
 from app.services.parser_service import count_rows, preview_file, read_file
+from app.services.storage import get_storage_backend
+from app.services.upload_safety import detect_prohibited_sensitive_data, validate_upload_metadata
+from app.services.usage_service import increment_upload_usage
 
 
 logger = logging.getLogger(__name__)
 
 
-SUPPORTED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+SUPPORTED_EXTENSIONS = {".csv", ".xlsx"}
 
 
 def _file_type(filename: str) -> str:
     suffix = Path(filename).suffix.lower()
     if suffix == ".csv":
         return "csv"
-    if suffix in {".xlsx", ".xls"}:
+    if suffix == ".xlsx":
         return "excel"
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -39,6 +44,7 @@ def get_file_for_org(db: Session, file_id: uuid.UUID, organization_id: uuid.UUID
         select(UploadedFile).where(
             UploadedFile.id == file_id,
             UploadedFile.organization_id == organization_id,
+            UploadedFile.deleted_at.is_(None),
         )
     )
     if not uploaded_file:
@@ -50,27 +56,73 @@ def list_uploaded_files(db: Session, organization: Organization) -> list[Uploade
     return list(
         db.scalars(
             select(UploadedFile)
-            .where(UploadedFile.organization_id == organization.id)
+            .where(UploadedFile.organization_id == organization.id, UploadedFile.deleted_at.is_(None))
             .order_by(UploadedFile.created_at.desc())
         )
     )
 
 
 def save_uploaded_file(
-    db: Session, *, upload: UploadFile, user: User, organization: Organization
+    db: Session,
+    *,
+    upload: UploadFile,
+    user: User,
+    organization: Organization,
+    prohibited_data_acknowledged: bool,
 ) -> UploadedFile:
+    if not prohibited_data_acknowledged:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "PROHIBITED_DATA_ACKNOWLEDGEMENT_REQUIRED",
+                "message": "Confirm that the upload excludes prohibited payment-card, credential, and secret data.",
+            },
+        )
+    can_upload_file(db, organization.id)
     settings = get_settings()
     original_filename = upload.filename or "upload.csv"
+    validate_upload_metadata(original_filename, upload.content_type)
     file_type = _file_type(original_filename)
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
-    stored_filename = f"{uuid.uuid4()}{Path(original_filename).suffix.lower()}"
-    file_path = upload_dir / stored_filename
+    temp_path = upload_dir / "tmp" / f"{uuid.uuid4()}{Path(original_filename).suffix.lower()}"
+    temp_path.parent.mkdir(parents=True, exist_ok=True)
+    max_size_bytes = settings.max_upload_size_mb_free * 1024 * 1024
+    bytes_written = 0
+    with temp_path.open("wb") as output:
+        while chunk := upload.file.read(1024 * 1024):
+            bytes_written += len(chunk)
+            if bytes_written > max_size_bytes:
+                output.close()
+                temp_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Uploaded file exceeds the plan size limit.")
+            output.write(chunk)
+    if detect_prohibited_sensitive_data(temp_path):
+        temp_path.unlink(missing_ok=True)
+        create_audit_log(
+            db,
+            organization_id=organization.id,
+            user_id=user.id,
+            action="prohibited_upload_rejected",
+            entity_type="uploaded_file",
+            metadata={"original_filename": original_filename},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "PROHIBITED_SENSITIVE_DATA_DETECTED",
+                "message": "This upload may contain prohibited payment-card or authentication data. Remove those fields and upload a redacted export.",
+            },
+        )
 
-    with file_path.open("wb") as output:
-        shutil.copyfileobj(upload.file, output)
+    file_id = uuid.uuid4()
+    stored_filename = f"{file_id}{Path(original_filename).suffix.lower()}"
+    object_key = f"organizations/{organization.id}/uploads/{file_id}/{uuid.uuid4()}{Path(original_filename).suffix.lower()}"
+    file_path = get_storage_backend().save_file(temp_path, object_key)
 
     uploaded_file = UploadedFile(
+        id=file_id,
         organization_id=organization.id,
         uploaded_by_user_id=user.id,
         original_filename=original_filename,
@@ -78,6 +130,7 @@ def save_uploaded_file(
         file_path=str(file_path),
         file_type=file_type,
         status="uploaded",
+        retention_expires_at=utc_now() + timedelta(hours=24),
     )
     db.add(uploaded_file)
     db.flush()
@@ -101,7 +154,9 @@ def preview_uploaded_file(
     uploaded_file = get_file_for_org(db, file_id, organization.id)
     try:
         columns, rows = preview_file(uploaded_file.file_path)
-        uploaded_file.row_count = count_rows(uploaded_file.file_path)
+        row_count = count_rows(uploaded_file.file_path)
+        can_process_rows(db, organization.id, row_count)
+        uploaded_file.row_count = row_count
         uploaded_file.status = "previewed"
         create_audit_log(
             db,
@@ -140,6 +195,7 @@ def normalize_uploaded_file(
         ) from exc
 
     validate_column_mapping(mapping, columns)
+    can_process_rows(db, organization.id, len(rows))
 
     valid_records: list[NormalizedRecord] = []
     rejected_records: list[RejectedRecord] = []
@@ -203,6 +259,8 @@ def normalize_uploaded_file(
         db.add_all(rejected_records)
         uploaded_file.row_count = len(rows)
         uploaded_file.status = file_status
+        uploaded_file.retention_expires_at = utc_now() + timedelta(hours=24)
+        increment_upload_usage(db, organization.id, rows_processed=len(rows))
         create_audit_log(
             db,
             organization_id=organization.id,
@@ -295,14 +353,15 @@ def list_rejected_records(
     offset: int = 0,
     limit: int = 100,
 ) -> RejectedRecordListResponse:
-    uploaded_file = db.scalar(select(UploadedFile).where(UploadedFile.id == file_id))
+    uploaded_file = db.scalar(
+        select(UploadedFile).where(
+            UploadedFile.id == file_id,
+            UploadedFile.organization_id == organization.id,
+            UploadedFile.deleted_at.is_(None),
+        )
+    )
     if not uploaded_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
-    if uploaded_file.organization_id != organization.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this file.",
-        )
     filters = (
         RejectedRecord.uploaded_file_id == uploaded_file.id,
         RejectedRecord.organization_id == organization.id,
@@ -320,3 +379,47 @@ def list_rejected_records(
     return RejectedRecordListResponse(
         uploaded_file_id=uploaded_file.id, total_rejected=total, records=records
     )
+
+
+def delete_uploaded_file(
+    db: Session, *, file_id: uuid.UUID, user: User, organization: Organization
+) -> None:
+    uploaded_file = get_file_for_org(db, file_id, organization.id)
+    active_run_count = db.scalar(
+        select(func.count()).select_from(ReconciliationRun).where(
+            or_(
+                ReconciliationRun.file_a_id == file_id,
+                ReconciliationRun.file_b_id == file_id,
+            ),
+            ReconciliationRun.organization_id == organization.id,
+            ReconciliationRun.deleted_at.is_(None),
+        )
+    ) or 0
+    if active_run_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Delete dependent reconciliation runs before deleting this file.",
+        )
+    try:
+        path = Path(uploaded_file.file_path)
+        if path.is_absolute():
+            path.unlink(missing_ok=True)
+        else:
+            get_storage_backend().delete_file(uploaded_file.file_path)
+    except Exception:
+        logger.exception("Could not delete stored file %s", uploaded_file.id)
+        raise HTTPException(status_code=500, detail="Could not delete stored file.") from None
+    db.execute(delete(NormalizedRecord).where(NormalizedRecord.uploaded_file_id == file_id, NormalizedRecord.organization_id == organization.id))
+    db.execute(delete(RejectedRecord).where(RejectedRecord.uploaded_file_id == file_id, RejectedRecord.organization_id == organization.id))
+    uploaded_file.status = "deleted"
+    uploaded_file.deleted_at = utc_now()
+    uploaded_file.storage_deleted_at = utc_now()
+    create_audit_log(
+        db,
+        organization_id=organization.id,
+        user_id=user.id,
+        action="file_deleted",
+        entity_type="uploaded_file",
+        entity_id=uploaded_file.id,
+    )
+    db.commit()

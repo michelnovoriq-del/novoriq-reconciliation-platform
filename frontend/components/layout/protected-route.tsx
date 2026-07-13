@@ -12,7 +12,10 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const hasToken = typeof window !== "undefined" && Boolean(getToken());
 
   useEffect(() => {
-    if (!hasToken && !isLoading) router.replace("/login");
+    if (!hasToken && !isLoading) {
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      router.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+    }
   }, [hasToken, isLoading, router]);
 
   if (isLoading || (hasToken && !isAuthenticated)) {

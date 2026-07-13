@@ -22,7 +22,7 @@ const config: Config = {
         glass: "0 20px 80px rgba(2, 132, 199, 0.22)",
       },
       fontFamily: {
-        sans: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
+        sans: ["Inter", "system-ui", "sans-serif"],
       },
       keyframes: {
         float: {

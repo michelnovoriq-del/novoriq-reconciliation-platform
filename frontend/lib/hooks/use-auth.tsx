@@ -3,13 +3,22 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { api, clearToken, getToken, setToken, type User } from "@/lib/api/client";
+import { api, clearToken, getToken, setToken, type AccountBootstrap, type User } from "@/lib/api/client";
+
+export function safeReturnTo(value?: string | null) {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return "/dashboard";
+  try {
+    const parsed = new URL(value, "http://novoriq.local");
+    return parsed.origin === "http://novoriq.local" ? `${parsed.pathname}${parsed.search}${parsed.hash}` : "/dashboard";
+  } catch { return "/dashboard"; }
+}
 
 type AuthContextValue = {
   user: User | null;
+  account: AccountBootstrap | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (payload: { email: string; password: string }) => Promise<void>;
+  login: (payload: { email: string; password: string }, redirectTo?: string) => Promise<void>;
   register: (payload: {
     full_name?: string;
     email: string;
@@ -17,6 +26,7 @@ type AuthContextValue = {
     organization_name: string;
   }) => Promise<void>;
   logout: () => void;
+  refreshAccount: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -30,28 +40,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setHasToken(Boolean(getToken()));
   }, []);
 
-  const meQuery = useQuery({
-    queryKey: ["me"],
-    queryFn: api.me,
+  const accountQuery = useQuery({
+    queryKey: ["account", "bootstrap"],
+    queryFn: api.getAccountBootstrap,
     enabled: hasToken,
     retry: false,
   });
 
   useEffect(() => {
-    if (meQuery.error) {
+    if (accountQuery.error) {
       clearToken();
       setHasToken(false);
       queryClient.clear();
     }
-  }, [meQuery.error, queryClient]);
+  }, [accountQuery.error, queryClient]);
 
   const loginMutation = useMutation({
-    mutationFn: api.login,
-    onSuccess: async (response) => {
+    mutationFn: (payload: { email: string; password: string; redirectTo?: string }) => api.login(payload),
+    onSuccess: async (response, variables) => {
       setToken(response.access_token);
       setHasToken(true);
-      await queryClient.invalidateQueries({ queryKey: ["me"] });
-      router.push("/dashboard");
+      await queryClient.invalidateQueries({ queryKey: ["account", "bootstrap"] });
+      router.push(safeReturnTo(variables.redirectTo));
     },
   });
 
@@ -60,18 +70,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     onSuccess: async (response) => {
       setToken(response.access_token);
       setHasToken(true);
-      if (response.user) queryClient.setQueryData(["me"], response.user);
-      router.push("/dashboard");
+      await queryClient.invalidateQueries({ queryKey: ["account", "bootstrap"] });
+      router.push("/onboarding");
     },
   });
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      user: meQuery.data ?? null,
-      isLoading: hasToken && meQuery.isLoading,
-      isAuthenticated: Boolean(meQuery.data),
-      login: async (payload) => {
-        await loginMutation.mutateAsync(payload);
+      user: accountQuery.data ? { id: accountQuery.data.user.id, email: accountQuery.data.user.email,
+        full_name: accountQuery.data.user.full_name, is_active: true,
+        email_verified_at: accountQuery.data.user.email_verified ? new Date().toISOString() : null,
+        created_at: "", updated_at: "" } : null,
+      account: accountQuery.data ?? null,
+      isLoading: hasToken && accountQuery.isLoading,
+      isAuthenticated: Boolean(accountQuery.data),
+      login: async (payload, redirectTo) => {
+        await loginMutation.mutateAsync({ ...payload, redirectTo });
       },
       register: async (payload) => {
         await registerMutation.mutateAsync(payload);
@@ -82,8 +96,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         queryClient.clear();
         router.push("/login");
       },
+      refreshAccount: async () => { await accountQuery.refetch(); },
     }),
-    [hasToken, loginMutation, meQuery.data, meQuery.isLoading, queryClient, registerMutation, router],
+    [accountQuery, hasToken, loginMutation, queryClient, registerMutation, router],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

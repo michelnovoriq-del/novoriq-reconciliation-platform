@@ -12,6 +12,7 @@ import { ErrorAlert } from "@/components/ui/alert";
 export default function UploadPage() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<File | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
   const [uploaded, setUploaded] = useState<UploadedFile | null>(null);
   const [error, setError] = useState("");
   const upload = useMutation({
@@ -26,7 +27,7 @@ export default function UploadPage() {
     if (!selected) return;
     setError("");
     try {
-      await upload.mutateAsync(selected);
+      await upload.mutateAsync({ file: selected, prohibitedDataAcknowledged: acknowledged });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
     }
@@ -60,11 +61,24 @@ export default function UploadPage() {
             <FileUp className="h-7 w-7" />
           </div>
           <p className="text-lg font-black text-ink">{selected ? selected.name : "Drop your CSV here"}</p>
-          <p className="mt-2 text-sm text-slate-600">One file at a time for the MVP workflow.</p>
+          <p className="mt-2 text-sm text-slate-600">CSV or XLSX exports only.</p>
+        </label>
+
+        <label className="mt-5 flex gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-700">
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(event) => setAcknowledged(event.target.checked)}
+            className="mt-1 h-4 w-4 rounded border-slate-300"
+          />
+          <span>
+            I confirm that this file does not contain full payment-card numbers, CVV/CVC security codes, passwords,
+            authentication secrets, private keys, or other prohibited sensitive credentials.
+          </span>
         </label>
 
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-          <Button variant="sky" onClick={submit} disabled={!selected || upload.isPending}>
+          <Button variant="sky" onClick={submit} disabled={!selected || !acknowledged || upload.isPending}>
             {upload.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
             Upload file
           </Button>

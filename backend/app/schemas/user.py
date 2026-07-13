@@ -9,6 +9,7 @@ class UserResponse(BaseModel):
     email: EmailStr
     full_name: str | None = None
     is_active: bool
+    email_verified_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

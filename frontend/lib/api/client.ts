@@ -6,6 +6,7 @@ export type User = {
   email: string;
   full_name: string | null;
   is_active: boolean;
+  email_verified_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -14,6 +15,15 @@ export type AuthResponse = {
   access_token: string;
   token_type: string;
   user?: User;
+};
+
+export type AccountBootstrap = {
+  user: { id: string; email: string; full_name: string | null; email_verified: boolean; role: string };
+  organization: { id: string; name: string };
+  subscription: { plan_code: string; plan_name: string; status: string; billing_provider: string | null; current_period_end: string | null };
+  usage: { reconciliation_runs_used: number; reconciliation_runs_limit: number; remaining_reconciliation_runs: number; files_uploaded: number; rows_processed: number; reset_at: string };
+  entitlements: { max_files_per_run: number; max_rows_per_file: number; max_users: number; max_client_workspaces: number; detailed_retention_days: number };
+  billing: { membership_linked: boolean; whop_status: string | null; pending_action: boolean };
 };
 
 export type UploadedFile = {
@@ -124,6 +134,45 @@ export type ReconciliationResults = {
   };
 };
 
+export type CurrentEntitlements = {
+  plan: {
+    code: string;
+    name: string;
+    monthly_price_usd: string;
+    monthly_run_limit: number;
+    max_files_per_run: number;
+    max_rows_per_file: number;
+    max_users: number;
+    max_client_workspaces: number;
+    detailed_retention_days: number;
+    features: Record<string, unknown>;
+  };
+  usage: {
+    period_start: string;
+    period_end: string;
+    reconciliation_runs_used: number;
+    files_uploaded: number;
+    rows_processed: number;
+    exports_generated: number;
+  };
+  remaining_reconciliation_runs: number;
+  remaining_file_capacity: number;
+};
+
+export type BillingStatus = {
+  plan_code: string;
+  plan_name: string;
+  subscription_status: string;
+  billing_provider: string | null;
+  whop_linked: boolean;
+  pending_whop_link: boolean;
+  pending_reason: string | null;
+  manage_url: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  message: string | null;
+};
+
 export class ApiError extends Error {
   status: number;
 
@@ -209,12 +258,25 @@ export const api = {
   login: (payload: { email: string; password: string }) =>
     request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
   me: () => request<User>("/auth/me"),
+  getAccountBootstrap: () => request<AccountBootstrap>("/account/bootstrap"),
+  requestEmailVerification: (payload: { email: string }) =>
+    request<{ status: string }>("/auth/request-email-verification", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  verifyEmail: (payload: { token: string }) =>
+    request<{ status: string }>("/auth/verify-email", { method: "POST", body: JSON.stringify(payload) }),
   listFiles: () => request<UploadedFile[]>("/files"),
-  uploadFile: (file: File) => {
+  uploadFile: (payload: { file: File; prohibitedDataAcknowledged: boolean }) => {
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", payload.file);
+    formData.append("prohibited_data_acknowledged", String(payload.prohibitedDataAcknowledged));
     return request<UploadedFile>("/files/upload", { method: "POST", body: formData });
   },
+  getCurrentEntitlements: () => request<CurrentEntitlements>("/billing/current"),
+  getBillingStatus: () => request<BillingStatus>("/billing/status"),
+  syncWhopAccess: () => request<BillingStatus>("/billing/sync-whop-access", { method: "POST" }),
+  deleteFile: (fileId: string) => request<void>(`/files/${fileId}`, { method: "DELETE" }),
   previewFile: (fileId: string) => request<FilePreview>(`/files/${fileId}/preview`),
   normalizeFile: (fileId: string, mapping: ColumnMapping) =>
     request<NormalizeResponse>(`/files/${fileId}/normalize`, {
@@ -239,4 +301,6 @@ export const api = {
   rejectMatch: (matchId: string) =>
     request<{ id: string; status: string; reviewed_at: string }>(`/match-results/${matchId}/reject`, { method: "POST" }),
   exportReconciliationRun: (runId: string) => download(`/reconciliation-runs/${runId}/export`),
+  deleteReconciliationRun: (runId: string) =>
+    request<void>(`/reconciliation-runs/${runId}`, { method: "DELETE" }),
 };

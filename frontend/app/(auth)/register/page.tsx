@@ -17,7 +17,11 @@ const schema = z.object({
   full_name: z.string().min(2, "Enter your name."),
   email: z.string().email("Enter a valid email address."),
   password: z.string().min(8, "Use at least 8 characters."),
+  confirm_password: z.string(),
   organization_name: z.string().min(1, "Organization name is required."),
+  terms: z.literal(true, { errorMap: () => ({ message: "You must accept the Terms and Privacy Policy." }) }),
+}).refine((values) => values.password === values.confirm_password, {
+  path: ["confirm_password"], message: "Passwords do not match.",
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -27,13 +31,14 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { full_name: "", email: "", password: "", organization_name: "" },
+    defaultValues: { full_name: "", email: "", password: "", confirm_password: "", organization_name: "", terms: false as true },
   });
 
   async function onSubmit(values: FormValues) {
     setError("");
     try {
-      await register(values);
+      await register({ full_name: values.full_name, email: values.email, password: values.password,
+        organization_name: values.organization_name });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create account.");
     }
@@ -60,6 +65,16 @@ export default function RegisterPage() {
           <p className="text-xs text-red-600">{form.formState.errors.full_name?.message}</p>
         </div>
         <div className="space-y-2">
+          <Label htmlFor="confirm_password">Confirm password</Label>
+          <Input id="confirm_password" type="password" autoComplete="new-password" {...form.register("confirm_password")} />
+          <p className="text-xs text-red-600">{form.formState.errors.confirm_password?.message}</p>
+        </div>
+        <label className="flex items-start gap-3 text-sm text-slate-700">
+          <input type="checkbox" className="mt-1 h-4 w-4" {...form.register("terms")} />
+          <span>I agree to the <Link className="font-bold text-deepblue underline" href="/terms">Terms of Service</Link> and acknowledge the <Link className="font-bold text-deepblue underline" href="/privacy">Privacy Policy</Link>.</span>
+        </label>
+        <p className="text-xs text-red-600">{form.formState.errors.terms?.message}</p>
+        <div className="space-y-2">
           <Label htmlFor="organization_name">Organization</Label>
           <Input id="organization_name" autoComplete="organization" {...form.register("organization_name")} />
           <p className="text-xs text-red-600">{form.formState.errors.organization_name?.message}</p>
@@ -76,7 +91,7 @@ export default function RegisterPage() {
         </div>
         <Button type="submit" variant="sky" className="w-full" disabled={form.formState.isSubmitting}>
           {form.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Create account
+          {form.formState.isSubmitting ? "Creating your Novoriq workspace..." : "Create account"}
         </Button>
       </form>
     </AuthCard>

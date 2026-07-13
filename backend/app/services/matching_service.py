@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.models import MatchResult, NormalizedRecord, Organization, ReconciliationRun, User
 from app.services.audit_service import create_audit_log
 from app.services.reconciliation_service import get_reconciliation_run
+from app.services.upload_safety import neutralize_spreadsheet_formula
+from app.services.usage_service import increment_export_usage
 
 
 MAX_REVIEW_DATE_DIFF_DAYS = 5
@@ -582,10 +584,11 @@ def export_results(
                 f"{prefix}_description": record.description if record else None,
                 f"{prefix}_customer_name": record.customer_name if record else None,
             })
-        writer.writerow(row)
+        writer.writerow({key: neutralize_spreadsheet_formula(value) for key, value in row.items()})
     create_audit_log(
         db, organization_id=organization.id, user_id=user.id, action="reconciliation_exported",
         entity_type="reconciliation_run", entity_id=run.id,
     )
+    increment_export_usage(db, organization.id)
     db.commit()
     return output.getvalue()

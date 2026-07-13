@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -19,6 +19,7 @@ from app.services.file_service import (
     normalize_uploaded_file,
     preview_uploaded_file,
     save_uploaded_file,
+    delete_uploaded_file,
 )
 
 
@@ -36,11 +37,18 @@ def list_files(
 @router.post("/upload", response_model=UploadedFileResponse, status_code=status.HTTP_201_CREATED)
 def upload_file(
     file: UploadFile = File(...),
+    prohibited_data_acknowledged: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     organization: Organization = Depends(get_active_organization),
 ):
-    return save_uploaded_file(db, upload=file, user=current_user, organization=organization)
+    return save_uploaded_file(
+        db,
+        upload=file,
+        user=current_user,
+        organization=organization,
+        prohibited_data_acknowledged=prohibited_data_acknowledged,
+    )
 
 
 @router.get("/{file_id}/preview", response_model=FilePreviewResponse)
@@ -85,3 +93,13 @@ def rejected_records(
     return list_rejected_records(
         db, file_id=file_id, organization=organization, offset=offset, limit=limit
     )
+
+
+@router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_file(
+    file_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    organization: Organization = Depends(get_active_organization),
+):
+    delete_uploaded_file(db, file_id=file_id, user=current_user, organization=organization)

@@ -22,6 +22,12 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     reconciliation_runs: Mapped[list["ReconciliationRun"]] = relationship(
         "ReconciliationRun", back_populates="organization"
     )
+    subscription: Mapped["OrganizationSubscription | None"] = relationship(
+        "OrganizationSubscription", back_populates="organization", uselist=False, cascade="all, delete-orphan"
+    )
+    usage_periods: Mapped[list["UsagePeriod"]] = relationship(
+        "UsagePeriod", back_populates="organization", cascade="all, delete-orphan"
+    )
 
 
 class OrganizationMember(UUIDPrimaryKeyMixin, Base):

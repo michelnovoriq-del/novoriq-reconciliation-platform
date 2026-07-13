@@ -14,6 +14,7 @@ from app.schemas.match_result import ReconciliationResultsResponse
 from app.services.matching_service import export_results, get_results, run_matching
 from app.services.reconciliation_service import (
     create_reconciliation_run,
+    delete_reconciliation_run,
     get_reconciliation_run,
     list_reconciliation_runs,
 )
@@ -76,3 +77,8 @@ def export_run(run_id: uuid.UUID, db: Session = Depends(get_db), current_user: U
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="reconciliation_run_{run_id}.csv"'},
     )
+
+
+@router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_run(run_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), organization: Organization = Depends(get_active_organization)):
+    delete_reconciliation_run(db, run_id=run_id, user=current_user, organization=organization)
