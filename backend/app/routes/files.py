@@ -1,9 +1,10 @@
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.config import get_settings
 from app.dependencies import get_active_organization, get_current_user
 from app.models import Organization, User
 from app.schemas.file import (
@@ -42,6 +43,12 @@ def upload_file(
     current_user: User = Depends(get_current_user),
     organization: Organization = Depends(get_active_organization),
 ):
+    settings = get_settings()
+    if settings.is_production and settings.storage_backend == "local" and not settings.allow_ephemeral_test_uploads:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Uploads are unavailable until persistent private storage is configured.",
+        )
     return save_uploaded_file(
         db,
         upload=file,
