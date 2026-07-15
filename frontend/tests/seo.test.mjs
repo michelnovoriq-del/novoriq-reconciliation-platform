@@ -1,0 +1,10 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const read=(p)=>fs.readFileSync(new URL(`../${p}`,import.meta.url),"utf8");
+const routes=["/","/pricing","/features","/how-it-works","/use-cases/bookkeepers","/use-cases/accounting-firms","/use-cases/ecommerce-reconciliation","/security","/data-retention","/privacy","/terms","/support"];
+test("sitemap contains all 12 public routes",()=>{const source=read("app/sitemap.ts");for(const route of routes)assert.ok(source.includes(`\"${route}\"`),route);});
+test("sitemap excludes private routes",()=>{const source=read("app/sitemap.ts");for(const route of ["/login","/dashboard","/files"])assert.ok(!source.includes(`[\"${route}\"`),route);});
+test("robots restricts private crawl paths",()=>{const source=read("app/robots.ts");for(const route of ["/api/","/dashboard/","/files/","/reconciliation-runs/","/settings/"])assert.ok(source.includes(`\"${route}\"`),route);});
+test("private layouts share noindex metadata",()=>{for(const path of ["app/(auth)/layout.tsx","app/(app)/layout.tsx","app/onboarding/layout.tsx","app/billing/return/layout.tsx"])assert.match(read(path),/privateMetadata/);assert.match(read("lib/metadata.ts"),/index: false/);});
+test("production site URL is centralized and HTTPS-validated",()=>{const source=read("lib/site-config.ts");assert.match(source,/NEXT_PUBLIC_SITE_URL/);assert.match(source,/parsed\.protocol !== \"https:\"/);});

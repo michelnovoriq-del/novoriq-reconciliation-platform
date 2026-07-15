@@ -1,0 +1,3 @@
+import type { MetadataRoute } from "next"; import { absoluteUrl } from "@/lib/site-config";
+const routes: Array<[string, MetadataRoute.Sitemap[number]["changeFrequency"], number]> = [["/","weekly",1],["/pricing","monthly",.9],["/features","monthly",.9],["/how-it-works","monthly",.9],["/use-cases/bookkeepers","monthly",.8],["/use-cases/accounting-firms","monthly",.8],["/use-cases/ecommerce-reconciliation","monthly",.8],["/security","monthly",.7],["/data-retention","monthly",.6],["/privacy","yearly",.4],["/terms","yearly",.4],["/support","monthly",.5]];
+export default function sitemap():MetadataRoute.Sitemap{return routes.map(([path,changeFrequency,priority])=>({url:absoluteUrl(path),changeFrequency,priority}));}

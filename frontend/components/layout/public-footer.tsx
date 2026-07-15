@@ -1,0 +1,8 @@
+import Link from "next/link";
+import { siteConfig } from "@/lib/site-config";
+const groups = [
+  ["Product", [["Features","/features"],["How It Works","/how-it-works"],["Pricing","/pricing"]]],
+  ["Use Cases", [["Bookkeepers","/use-cases/bookkeepers"],["Accounting Firms","/use-cases/accounting-firms"],["Ecommerce Reconciliation","/use-cases/ecommerce-reconciliation"]]],
+  ["Trust", [["Security","/security"],["Data Retention","/data-retention"],["Privacy","/privacy"],["Terms","/terms"]]],
+] as const;
+export function PublicFooter() { return <footer className="border-t border-slate-200 bg-white"><div className="mx-auto grid max-w-7xl gap-10 px-5 py-12 sm:px-8 lg:grid-cols-5"><div className="lg:col-span-2"><p className="text-xl font-black">Novoriq</p><p className="mt-3 max-w-sm text-sm leading-6 text-slate-600">Rules match. Humans approve. A review-first workflow for financial exports.</p><Link href="/register" className="mt-5 inline-block font-black text-deepblue">Start Free Forever →</Link></div>{groups.map(([title, links]) => <div key={title}><h2 className="text-sm font-black">{title}</h2><ul className="mt-3 space-y-2">{links.map(([l,h]) => <li key={h}><Link className="text-sm text-slate-600 hover:text-deepblue" href={h}>{l}</Link></li>)}</ul></div>)}</div><div className="border-t px-5 py-6 text-center text-sm text-slate-500"><Link href="/support" className="hover:text-deepblue">Support</Link> · <a href={`mailto:${siteConfig.supportEmail}`} className="hover:text-deepblue">{siteConfig.supportEmail}</a><p className="mt-2">© {new Date().getFullYear()} Novoriq</p></div></footer>; }

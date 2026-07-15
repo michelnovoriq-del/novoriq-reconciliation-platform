@@ -13,7 +13,18 @@ The frontend expects:
 
 ```bash
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
+
+## Public product SEO
+
+Indexable routes are `/`, `/pricing`, `/features`, `/how-it-works`, three `/use-cases/*` pages, `/security`, `/data-retention`, `/privacy`, `/terms`, and `/support`.
+
+`lib/site-config.ts` is the single source of truth for canonical, Open Graph, sitemap, and robots origins. It removes a trailing slash and requires an explicit HTTPS `NEXT_PUBLIC_SITE_URL` in production. Public pages have unique server-rendered metadata and contextual links. `/sitemap.xml` contains only the public routes; `/robots.txt` references it and restricts private crawl paths. Auth, onboarding, billing-return, and authenticated layouts set `noindex, nofollow`; authentication remains the security boundary.
+
+Pricing retains authenticated plan-state hydration and the existing Whop flow. Static marketing pages do not fetch account data.
+
+Run `npm run lint`, `npm test`, `npm run build`, then start the build and run `SEO_BASE_URL=http://localhost:3000 npm run verify:seo`. Search Console and custom-domain instructions are in `../docs/`.
 
 ## E2E
 
