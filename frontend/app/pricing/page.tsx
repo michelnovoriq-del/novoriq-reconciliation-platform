@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api } from "@/lib/api/client";
 import { useAuth } from "@/lib/hooks/use-auth";
+import { PublicFooter } from "@/components/layout/public-footer";
+import { PublicHeader } from "@/components/layout/public-header";
 
 const supportEmail = "michelnovoriq@gmail.com";
 
@@ -131,34 +133,14 @@ export default function PricingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#FAF3E7] text-[#111827]">
-      <section className="border-b border-[#F5E6CC] bg-[#E0F2FE] px-5 py-6 sm:px-8">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
-          <Link href="/" className="text-lg font-black text-[#0369A1]">Novoriq</Link>
-          <div className="flex items-center gap-2">
-            {isAuthenticated ? (
-              <Button asChild variant="outline" size="sm">
-                <Link href="/dashboard">Dashboard</Link>
-              </Button>
-            ) : (
-              <>
-                <Button asChild variant="ghost" size="sm">
-                  <Link href="/login">Login</Link>
-                </Button>
-                <Button asChild variant="sky" size="sm">
-                  <Link href="/register">Start free</Link>
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-      </section>
-
+    <div className="min-h-screen bg-[#FAF3E7] text-[#111827]">
+      <PublicHeader />
+      <main>
       <section className="px-5 py-12 sm:px-8">
         <div className="mx-auto max-w-7xl">
           <div className="max-w-3xl">
             <p className="text-sm font-black uppercase text-[#0369A1]">Pricing</p>
-            <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Choose the reconciliation capacity your team needs.</h1>
+            <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Simple plans for growing reconciliation workflows</h1>
             <p className="mt-4 text-base leading-7 text-[#4B5563]">
               Free Forever includes the full core workflow. Paid plans are handled through Whop-hosted checkout.
             </p>
@@ -256,6 +238,7 @@ export default function PricingPage() {
           </div>
         </div>
       </section>
+      </main>
 
       {selectedPlan ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#111827]/50 p-4">
@@ -295,6 +278,7 @@ export default function PricingPage() {
           </div>
         </div>
       ) : null}
-    </main>
+      <PublicFooter />
+    </div>
   );
 }

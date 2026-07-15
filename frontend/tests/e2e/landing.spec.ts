@@ -8,18 +8,34 @@ test("homepage has primary SEO content and calls to action", async ({ page }) =>
 });
 
 test("main product navigation resolves", async ({ page }) => {
-  for(const [path,heading] of [["/features","structured reconciliation workflow"],["/how-it-works","messy financial exports"],["/pricing","reconciliation capacity"]]){
-    const response=await page.goto(path); expect(response?.status()).toBe(200); await expect(page.getByRole("heading",{level:1,name:new RegExp(heading)})).toBeVisible();
+  for(const [path,heading] of [["/features","structured reconciliation workflow"],["/how-it-works","messy financial exports"],["/pricing","simple plans for growing reconciliation workflows"]]){
+    const response=await page.goto(path); expect(response?.status()).toBe(200); await expect(page.getByRole("heading",{level:1,name:new RegExp(heading,"i")})).toBeVisible();
   }
 });
 
 test("use cases and trust pages have unique headings", async ({ page }) => {
+  test.setTimeout(120_000);
   const pages=[["/use-cases/bookkeepers","workflow for bookkeepers"],["/use-cases/accounting-firms","small accounting firms"],["/use-cases/ecommerce-reconciliation","ecommerce payouts"],["/security","security controls"],["/data-retention","retention and deletion"],["/privacy","Privacy Policy"],["/terms","Terms of Service"],["/support","How can we help"]];
-  for(const [path,heading] of pages){await page.goto(path);await expect(page.getByRole("heading",{level:1,name:new RegExp(heading,"i")})).toBeVisible();}
+  for(const [path,heading] of pages){
+    const response=await page.goto(path); expect(response?.status()).toBe(200);
+    await expect(page.getByRole("heading",{level:1})).toHaveCount(1);
+    await expect(page.getByRole("heading",{level:1,name:new RegExp(heading,"i")})).toBeVisible();
+    await expect(page.getByRole("contentinfo")).toContainText("Rules match. Humans approve.");
+  }
 });
 
 test("pricing preserves required prices", async ({ page }) => {await page.goto("/pricing");for(const value of ["$0","$279","$499"])await expect(page.getByText(value,{exact:true})).toBeVisible();});
 test("sitemap and robots render", async ({ request }) => {expect((await request.get("/sitemap.xml")).status()).toBe(200);expect((await request.get("/robots.txt")).status()).toBe(200);});
+test("public navigation and registration links work", async ({ page, isMobile }) => {
+  await page.goto("/");
+  if (isMobile) await page.getByRole("button", { name: "Toggle navigation" }).click();
+  await page.getByRole("navigation", { name: isMobile ? "Mobile navigation" : "Primary navigation" }).getByRole("link", { name: "Features" }).click();
+  await expect(page).toHaveURL(/\/features$/);
+  const registrationLink = page.getByRole("main").getByRole("link", { name: "Start Free Forever" });
+  await expect(registrationLink).toHaveAttribute("href", "/register");
+  await registrationLink.click();
+  await expect(page).toHaveURL(/\/register/);
+});
 test("private and auth routes do not expose public customer data", async ({ page }) => {await page.goto("/login");await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content",/noindex/);await page.goto("/dashboard");await expect(page).toHaveURL(/\/login/);});
 
 test("auth pages render forms", async ({ page }) => {await page.goto("/login");await expect(page.getByRole("heading",{name:/welcome back/i})).toBeVisible();await page.goto("/register");await expect(page.getByRole("heading",{name:/create your workspace/i})).toBeVisible();});
