@@ -29,3 +29,20 @@ pnpm-debug.log*
 
 # Logs
 *.log
+
+# Local backend files
+backend/.env
+backend/.venv/
+backend/uploads/
+backend/**/__pycache__/
+backend/**/*.pyc
+
+# Frontend build/test output
+frontend/.next/
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+.next/
+node_modules/
+test-results/
+playwright-report/
