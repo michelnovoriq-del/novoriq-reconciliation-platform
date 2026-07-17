@@ -39,7 +39,7 @@ def client() -> TestClient:
 
 def test_allowed_origin_preflight_and_authorization_header() -> None:
     response = client().options(
-        "/auth/login",
+        "/auth/register",
         headers={
             "Origin": PRODUCTION_FRONTEND_ORIGIN,
             "Access-Control-Request-Method": "POST",
@@ -86,6 +86,25 @@ def test_development_origins_are_separate() -> None:
     assert settings.cors_origins == ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 
+def test_list_settings_accept_json_and_comma_separated_environment(monkeypatch) -> None:
+    monkeypatch.setenv("BACKEND_CORS_ORIGINS", f" {PRODUCTION_FRONTEND_ORIGIN}/, https://second.example ")
+    monkeypatch.setenv("ALLOWED_HOSTS", f'["{PRODUCTION_BACKEND_HOST}"]')
+    settings = Settings(_env_file=None)
+    assert settings.backend_cors_origins == [PRODUCTION_FRONTEND_ORIGIN, "https://second.example"]
+    assert settings.allowed_hosts == [PRODUCTION_BACKEND_HOST]
+
+
+@pytest.mark.parametrize("origin", ["*", "ftp://example.com", "https://example.com/path", "not-a-url", ""])
+def test_invalid_cors_origin_is_rejected(origin: str) -> None:
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, backend_cors_origins=[origin])
+
+
+def test_render_host_is_accepted() -> None:
+    response = client().get("/health")
+    assert response.status_code == 200
+
+
 @pytest.mark.parametrize(
     "override",
     [
@@ -97,5 +116,5 @@ def test_development_origins_are_separate() -> None:
     ],
 )
 def test_invalid_production_configuration_fails_fast(override: dict) -> None:
-    with pytest.raises(RuntimeError):
+    with pytest.raises((RuntimeError, ValueError)):
         production_settings(**override).validate_production()

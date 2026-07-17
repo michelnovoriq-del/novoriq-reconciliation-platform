@@ -16,6 +16,16 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
 
+Netlify production must use exactly:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=https://novoriq-reconciliation-platform.onrender.com
+NEXT_PUBLIC_SITE_URL=https://agenticreconcilliation.netlify.app
+API_PROXY_TARGET=https://novoriq-reconciliation-platform.onrender.com
+```
+
+The browser client centralizes API requests in `lib/api/client.ts`. Authentication failures are mapped to user-safe messages; raw fetch/browser exceptions are never rendered by the login or registration forms.
+
 ## Public product SEO
 
 Indexable routes are `/`, `/pricing`, `/features`, `/how-it-works`, three `/use-cases/*` pages, `/security`, `/data-retention`, `/privacy`, `/terms`, and `/support`.

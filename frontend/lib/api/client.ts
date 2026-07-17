@@ -175,11 +175,13 @@ export type BillingStatus = {
 
 export class ApiError extends Error {
   status: number;
+  fieldErrors?: Record<string, string>;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, fieldErrors?: Record<string, string>) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.fieldErrors = fieldErrors;
   }
 }
 
@@ -197,10 +199,15 @@ export function clearToken() {
   if (typeof window !== "undefined") window.localStorage.removeItem("novoriq_token");
 }
 
-async function parseError(response: Response) {
+async function parseError(response: Response, path: string) {
   try {
     const payload: { detail?: string | Record<string, unknown> | Array<{ msg?: string }>; message?: string } =
       await response.json();
+    if (response.status === 409 && path === "/auth/register") return "An account with this email already exists. Log in or use another email.";
+    if (response.status === 401 && path === "/auth/login") return "Email or password is incorrect.";
+    if (response.status === 429) return "Too many attempts. Please wait before trying again.";
+    if (response.status >= 500 && path === "/auth/register") return "Something went wrong while creating your workspace. Please try again.";
+    if (response.status >= 500) return "Something went wrong. Please try again.";
     if (typeof payload.detail === "string") return payload.detail;
     if (Array.isArray(payload.detail)) {
       return payload.detail.map((item) => item.msg ?? "Invalid field").join(", ");
@@ -208,7 +215,7 @@ async function parseError(response: Response) {
     if (payload.detail && typeof payload.detail === "object") {
       const message = payload.detail.message;
       if (typeof message === "string") return message;
-      return JSON.stringify(payload.detail);
+      return "The server could not complete this request. Please try again.";
     }
     return payload.message ?? "Request failed";
   } catch {
@@ -226,13 +233,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  } catch {
+    throw new ApiError("Novoriq could not reach the server. Please try again shortly.", 0);
+  }
 
   if (!response.ok) {
-    throw new ApiError(await parseError(response), response.status);
+    throw new ApiError(await parseError(response, path), response.status);
   }
 
   if (response.status === 204) return undefined as T;
@@ -244,7 +253,7 @@ async function download(path: string): Promise<Blob> {
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const response = await fetch(`${API_BASE_URL}${path}`, { headers });
-  if (!response.ok) throw new ApiError(await parseError(response), response.status);
+  if (!response.ok) throw new ApiError(await parseError(response, path), response.status);
   return response.blob();
 }
 

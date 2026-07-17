@@ -25,8 +25,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     backend_public_url: str | None = None
-    backend_cors_origins: list[str] = Field(default_factory=list)
-    allowed_hosts: list[str] = Field(default_factory=list)
+    # Any is intentional: pydantic-settings 2.3 JSON-decodes list fields before
+    # field validators, which made the documented comma-separated format fail.
+    backend_cors_origins: Any = Field(default_factory=list)
+    allowed_hosts: Any = Field(default_factory=list)
     upload_dir: str = "uploads"
     storage_backend: str = "local"
     allow_ephemeral_test_uploads: bool = False
@@ -75,9 +77,43 @@ class Settings(BaseSettings):
             if stripped.startswith("["):
                 import json
 
-                return json.loads(stripped)
+                parsed = json.loads(stripped)
+                if not isinstance(parsed, list):
+                    raise ValueError("List settings must be a JSON array or comma-separated list")
+                return parsed
             return [item.strip() for item in stripped.split(",") if item.strip()]
-        return value
+        raise ValueError("List settings must be a JSON array or comma-separated list")
+
+    @field_validator("backend_cors_origins")
+    @classmethod
+    def normalize_cors_origins(cls, value: list[Any]) -> list[str]:
+        origins: list[str] = []
+        for raw in value:
+            if not isinstance(raw, str) or not raw.strip():
+                raise ValueError("CORS origins cannot contain empty or non-string values")
+            origin = raw.strip().rstrip("/")
+            parsed = urlparse(origin)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError(f"Invalid CORS origin: {raw!r}")
+            if parsed.path or parsed.params or parsed.query or parsed.fragment or parsed.username or parsed.password:
+                raise ValueError(f"CORS origins must contain only scheme and host: {raw!r}")
+            if origin not in origins:
+                origins.append(origin)
+        return origins
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def normalize_allowed_hosts(cls, value: list[Any]) -> list[str]:
+        hosts: list[str] = []
+        for raw in value:
+            if not isinstance(raw, str) or not raw.strip():
+                raise ValueError("Allowed hosts cannot contain empty or non-string values")
+            host = raw.strip().lower().rstrip(".")
+            if "://" in host or "/" in host or any(char.isspace() for char in host):
+                raise ValueError(f"Invalid allowed host: {raw!r}")
+            if host not in hosts:
+                hosts.append(host)
+        return hosts
 
     @field_validator("debug", mode="before")
     @classmethod

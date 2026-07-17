@@ -8,7 +8,7 @@ Last reviewed: 2026-07-14
 - Backend: `https://novoriq-reconciliation-platform.onrender.com`
 - Database: Neon PostgreSQL (the connection string must never be committed or logged)
 
-The backend accepts exactly `https://agenticreconcilliation.netlify.app` as its production browser origin. A trailing slash is not part of the origin setting. Local development separately accepts `http://localhost:3000` and `http://127.0.0.1:3000`.
+The backend accepts exactly `https://agenticreconcilliation.netlify.app` as its production browser origin. Configured origins are trimmed, deduplicated, validated, and have trailing slashes removed. Browser origins are still matched exactly, so an incoming value with a trailing slash is rejected. JSON arrays are preferred, while safely parsed comma-separated values remain compatible. Empty values, invalid schemes, URL paths, embedded credentials, and production wildcards fail configuration rather than being silently allowed. Local development separately accepts `http://localhost:3000` and `http://127.0.0.1:3000` only when no explicit allow-list is supplied.
 
 Authentication currently uses an `Authorization: Bearer` token. Therefore production CORS does not enable credentialed cookie transport. `Authorization` is explicitly accepted. The browser client currently persists the token in local storage; migrating to short-lived access tokens plus rotated secure HttpOnly refresh cookies is a remaining security task.
 
@@ -68,12 +68,12 @@ There is one intended migration head: `20260710_0005`. Default plans are seeded 
 ## Live verification
 
 ```bash
-curl -i -X OPTIONS 'https://novoriq-reconciliation-platform.onrender.com/auth/login' \
+curl -i -X OPTIONS 'https://novoriq-reconciliation-platform.onrender.com/auth/register' \
   -H 'Origin: https://agenticreconcilliation.netlify.app' \
   -H 'Access-Control-Request-Method: POST' \
   -H 'Access-Control-Request-Headers: content-type,authorization'
 
-curl -i -X OPTIONS 'https://novoriq-reconciliation-platform.onrender.com/auth/login' \
+curl -i -X OPTIONS 'https://novoriq-reconciliation-platform.onrender.com/auth/register' \
   -H 'Origin: https://malicious.example' \
   -H 'Access-Control-Request-Method: POST'
 
@@ -84,6 +84,8 @@ python scripts/production_smoke_test.py
 ```
 
 The first preflight must return `Access-Control-Allow-Origin: https://agenticreconcilliation.netlify.app`; the malicious-origin response must not include that header.
+
+After deployment, open `/register`, create a new synthetic account, confirm the success flow reaches onboarding/dashboard with **Free Forever** and **0 of 2** runs, then log out and sign in again at `/login`. Confirm browser developer tools show no raw `NetworkError`, `Failed to fetch`, or CORS exception in page content.
 
 ## Final acceptance checklist
 
