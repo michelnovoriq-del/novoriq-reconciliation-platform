@@ -1,9 +1,10 @@
 import csv
 import io
+import json
 import re
 import uuid
 from bisect import bisect_left
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from difflib import SequenceMatcher
@@ -49,9 +50,18 @@ UNKNOWN_REFERENCE_MARKERS = (
     "SHOP-UNKNOWN",
 )
 EXPORT_COLUMNS = [
-    "result_status",
+    "run_id",
+    "created_at",
+    "file_a_name",
+    "file_b_name",
+    "mapping_used_file_a",
+    "mapping_used_file_b",
+    "status",
     "confidence_score",
     "match_reason",
+    "exception_type",
+    "file_a_record_id",
+    "file_a_original_row_number",
     "amount_difference",
     "date_difference_days",
     "file_a_date",
@@ -59,11 +69,27 @@ EXPORT_COLUMNS = [
     "file_a_reference",
     "file_a_description",
     "file_a_customer_name",
+    "file_a_currency",
+    "file_a_gross_amount",
+    "file_a_processor_fee",
+    "file_a_net_amount",
+    "file_a_order_id",
+    "file_a_processor",
+    "file_a_payment_status",
+    "file_b_record_id",
+    "file_b_original_row_number",
     "file_b_date",
     "file_b_amount",
     "file_b_reference",
     "file_b_description",
     "file_b_customer_name",
+    "file_b_currency",
+    "file_b_account_number",
+    "file_b_transaction_type",
+    "file_b_bank_description",
+    "approved_by",
+    "approved_at",
+    "review_status",
 ]
 
 
@@ -209,6 +235,16 @@ def score_pair(
         _similarity(file_a.description, file_b.description),
         _similarity(file_a.customer_name, file_b.customer_name),
     )
+    order_id = str((file_a.raw_data or {}).get("order_id") or "").strip()
+    order_id_match = bool(
+        order_id
+        and order_id.casefold() in " ".join(
+            filter(None, (file_b.reference, file_b.description))
+        ).casefold()
+    )
+    currency_mismatch = bool(
+        file_a.currency and file_b.currency and file_a.currency.upper() != file_b.currency.upper()
+    )
 
     small_amount_difference = False
     amount_too_large = False
@@ -247,6 +283,10 @@ def score_pair(
         score += 10
     elif description_moderate:
         score += 5
+    if order_id_match:
+        score += 20
+    if currency_mismatch:
+        score -= 50
     if unknown_reference:
         score -= 25
     if amount_too_large:
@@ -266,6 +306,8 @@ def score_pair(
         and date_close
         and (reference_strong or description_strong)
     )
+    if currency_mismatch:
+        exact_candidate = False
     if unknown_reference:
         exact_candidate = (
             amount_exact
@@ -282,7 +324,7 @@ def score_pair(
             description_strong,
         )
     )
-    possible_candidate = date_reviewable and strong_signals >= 2
+    possible_candidate = date_reviewable and (strong_signals >= 2 or order_id_match)
 
     rejection_reasons: list[str] = []
     strong_financial_signal = amount_exact or reference_strong or (
@@ -317,10 +359,34 @@ def score_pair(
         possible_candidate = False
         rejection_reasons.append("file compatibility is weak without exact amount or strong reference evidence")
 
-    result_status = "matched" if exact_candidate else "possible_match" if possible_candidate else None
-    if result_status == "matched":
-        score = max(score, 85)
-    elif result_status == "possible_match":
+    if currency_mismatch:
+        possible_candidate = False
+        rejection_reasons.append("currencies do not match")
+
+    late_settlement = (
+        amount_exact
+        and reference_strong
+        and date_difference is not None
+        and 5 < date_difference <= 14
+        and not currency_mismatch
+    )
+    amount_variance = (
+        small_amount_difference
+        and reference_strong
+        and date_reviewable
+        and not currency_mismatch
+    )
+
+    result_status = (
+        "late_settlement" if late_settlement
+        else "amount_variance" if amount_variance
+        else "confident_match" if exact_candidate
+        else "possible_match" if possible_candidate
+        else None
+    )
+    if result_status == "confident_match":
+        score = max(score, 95)
+    elif result_status in {"possible_match", "amount_variance", "late_settlement"}:
         score = min(84, score)
     else:
         score = 0
@@ -341,12 +407,16 @@ def score_pair(
         f"{amount_text}, {date_text}, reference similarity {reference_similarity}%, "
         f"description/customer similarity {description_similarity}%"
     )
-    if result_status == "possible_match" and not amount_exact and small_amount_difference:
+    if result_status == "amount_variance":
+        reason = f"Amount variance: payout reference matches and {date_text}, but the bank amount differs by {amount_difference}."
+    elif result_status == "late_settlement":
+        reason = f"Late settlement: amount and payout reference match, but the bank deposit arrived {date_difference} days from the payout date."
+    elif result_status == "possible_match" and not amount_exact and small_amount_difference:
         reason = f"Possible match: {evidence}. Review as possible fee difference."
     elif result_status == "possible_match":
         reason = f"Possible match: {evidence}. Review supporting evidence."
-    elif result_status == "matched":
-        reason = f"{evidence}."
+    elif result_status == "confident_match":
+        reason = f"Confident match: {evidence}."
     elif rejection_reasons:
         reason = f"Rejected weak candidate: {'; '.join(rejection_reasons)}."
     else:
@@ -382,8 +452,34 @@ def select_candidate_pairs(
     likely_related: bool = True,
 ) -> list[tuple[int, int, PairScore]]:
     candidates: list[tuple[int, int, PairScore]] = []
+    reference_index: dict[str, set[int]] = {}
+    amount_index: dict[Decimal, set[int]] = {}
+    order_index: dict[str, set[int]] = {}
+    for b_index, record_b in enumerate(records_b):
+        normalized_reference = _normalize_reference(record_b.reference)
+        if normalized_reference:
+            reference_index.setdefault(normalized_reference, set()).add(b_index)
+        if record_b.amount is not None:
+            amount_index.setdefault(Decimal(record_b.amount), set()).add(b_index)
+        text = f"{record_b.reference or ''} {record_b.description or ''}".upper()
+        for token in re.findall(r"ORD-[A-Z0-9-]+", text):
+            order_index.setdefault(token, set()).add(b_index)
     for a_index, record_a in enumerate(records_a):
-        for b_index, record_b in enumerate(records_b):
+        likely_b: set[int] = set()
+        normalized_reference = _normalize_reference(record_a.reference)
+        if normalized_reference:
+            likely_b.update(reference_index.get(normalized_reference, set()))
+        if record_a.amount is not None:
+            likely_b.update(amount_index.get(Decimal(record_a.amount), set()))
+        order_id = str((record_a.raw_data or {}).get("order_id") or "").upper()
+        if order_id:
+            likely_b.update(order_index.get(order_id, set()))
+        # Preserve fuzzy-reference behavior for small files and unusual exports while
+        # avoiding a million comparisons for normal 1,000-row reconciliation runs.
+        if not likely_b and len(records_a) * len(records_b) <= 10_000:
+            likely_b.update(range(len(records_b)))
+        for b_index in likely_b:
+            record_b = records_b[b_index]
             pair = score_pair(record_a, record_b, likely_related=likely_related)
             if pair.status:
                 candidates.append((a_index, b_index, pair))
@@ -411,6 +507,21 @@ def select_candidate_pairs(
             continue
         used_a.add(a_index)
         used_b.add(b_index)
+        equally_ranked = [
+            candidate for candidate in candidates
+            if candidate != (a_index, b_index, pair)
+            and (candidate[0] == a_index or candidate[1] == b_index)
+            and candidate[2].confidence_score == pair.confidence_score
+            and candidate[2].amount_difference == pair.amount_difference
+            and candidate[2].reference_similarity == pair.reference_similarity
+        ]
+        if equally_ranked:
+            pair = replace(
+                pair,
+                status="duplicate_candidate",
+                confidence_score=min(pair.confidence_score, 84),
+                reason=f"Duplicate candidate: {len(equally_ranked) + 1} equally strong records require human review. {pair.reason}",
+            )
         selected.append((a_index, b_index, pair))
     return selected
 
@@ -445,12 +556,15 @@ def run_matching(
             file_a_record_id=records_a[a_index].id,
             file_b_record_id=records_b[b_index].id,
             status=pair.status,
+            suggested_status=pair.status,
             confidence_score=pair.confidence_score,
             match_reason=pair.reason,
             amount_difference=pair.amount_difference,
             date_difference_days=pair.date_difference_days,
             reference_similarity=pair.reference_similarity,
             description_similarity=pair.description_similarity,
+            duplicate_group_id=uuid.uuid4() if pair.status == "duplicate_candidate" else None,
+            duplicate_reason=pair.reason if pair.status == "duplicate_candidate" else None,
         ))
     results.extend(
         MatchResult(
@@ -458,6 +572,7 @@ def run_matching(
             reconciliation_run_id=run.id,
             file_a_record_id=record.id,
             status="unmatched_file_a",
+            suggested_status="unmatched_file_a",
             confidence_score=0,
             match_reason=(
                 "No reliable match found. Weak candidates were rejected because amount/reference evidence was insufficient."
@@ -472,6 +587,7 @@ def run_matching(
             reconciliation_run_id=run.id,
             file_b_record_id=record.id,
             status="unmatched_file_b",
+            suggested_status="unmatched_file_b",
             confidence_score=0,
             match_reason=(
                 "No reliable match found. Weak candidates were rejected because amount/reference evidence was insufficient."
@@ -509,9 +625,9 @@ def _load_results(db: Session, run_id: uuid.UUID, organization_id: uuid.UUID) ->
 
 def build_results_response(db: Session, *, run: ReconciliationRun, organization: Organization) -> dict:
     results = _load_results(db, run.id, organization.id)
-    green = [item for item in results if item.status in {"matched", "approved"}]
-    yellow = [item for item in results if item.status == "possible_match"]
-    red = [item for item in results if item.status in {"unmatched_file_a", "unmatched_file_b", "rejected"}]
+    green = [item for item in results if item.status in {"confident_match", "approved"}]
+    yellow = [item for item in results if item.status in {"possible_match", "amount_variance", "late_settlement", "duplicate_candidate", "manual_review_required"}]
+    red = [item for item in results if item.status in {"unmatched_file_a", "unmatched_file_b", "reviewed_unmatched", "rejected"}]
     return {
         "run_id": run.id,
         "status": run.status,
@@ -525,6 +641,13 @@ def build_results_response(db: Session, *, run: ReconciliationRun, organization:
             "red_count": len(red),
             "approved_count": sum(item.status == "approved" for item in results),
             "rejected_count": sum(item.status == "rejected" for item in results),
+            "confident_count": sum(item.status == "confident_match" for item in results),
+            "possible_count": sum(item.status == "possible_match" for item in results),
+            "amount_variance_count": sum(item.status == "amount_variance" for item in results),
+            "late_settlement_count": sum(item.status == "late_settlement" for item in results),
+            "duplicate_candidate_count": sum(item.status == "duplicate_candidate" for item in results),
+            "unmatched_file_a_count": sum(item.suggested_status == "unmatched_file_a" for item in results),
+            "unmatched_file_b_count": sum(item.suggested_status == "unmatched_file_b" for item in results),
         },
     }
 
@@ -545,9 +668,11 @@ def review_match(
     result.status = decision
     result.reviewed_by_user_id = user.id
     result.reviewed_at = datetime.now(timezone.utc)
+    run = get_reconciliation_run(db, run_id=result.reconciliation_run_id, organization=organization)
     create_audit_log(
         db,
         organization_id=organization.id,
+        workspace_id=run.workspace_id,
         user_id=user.id,
         action=f"match_result_{decision}",
         entity_type="match_result",
@@ -556,6 +681,30 @@ def review_match(
     db.commit()
     db.refresh(result)
     return result
+
+
+def mark_unmatched_reviewed(db: Session, *, match_id: uuid.UUID, notes: str | None, user: User, organization: Organization) -> MatchResult:
+    result = db.scalar(select(MatchResult).where(MatchResult.id == match_id, MatchResult.organization_id == organization.id))
+    if not result:
+        raise HTTPException(status_code=404, detail="Match result not found.")
+    if result.suggested_status not in {"unmatched_file_a", "unmatched_file_b"}:
+        raise HTTPException(status_code=400, detail="Only unmatched rows can be marked reviewed.")
+    result.status = "reviewed_unmatched"; result.review_notes = notes; result.reviewed_by_user_id = user.id; result.reviewed_at = datetime.now(timezone.utc)
+    run = get_reconciliation_run(db, run_id=result.reconciliation_run_id, organization=organization)
+    create_audit_log(db, organization_id=organization.id, workspace_id=run.workspace_id, user_id=user.id, action="unmatched_result_reviewed", entity_type="match_result", entity_id=result.id, metadata={"notes": notes} if notes else None)
+    db.commit(); db.refresh(result); return result
+
+
+def undo_review(db: Session, *, match_id: uuid.UUID, user: User, organization: Organization) -> MatchResult:
+    result = db.scalar(select(MatchResult).where(MatchResult.id == match_id, MatchResult.organization_id == organization.id))
+    if not result:
+        raise HTTPException(status_code=404, detail="Match result not found.")
+    if result.status == result.suggested_status:
+        raise HTTPException(status_code=400, detail="This result has no review to undo.")
+    previous = result.status; result.status = result.suggested_status; result.reviewed_by_user_id = None; result.reviewed_at = None; result.review_notes = None
+    run = get_reconciliation_run(db, run_id=result.reconciliation_run_id, organization=organization)
+    create_audit_log(db, organization_id=organization.id, workspace_id=run.workspace_id, user_id=user.id, action="match_result_review_undone", entity_type="match_result", entity_id=result.id, metadata={"previous_status": previous, "restored_status": result.suggested_status})
+    db.commit(); db.refresh(result); return result
 
 
 def export_results(
@@ -570,11 +719,25 @@ def export_results(
     writer.writeheader()
     for result in results:
         row = {
-            "result_status": result.status,
+            "run_id": run.id,
+            "created_at": result.created_at,
+            "file_a_name": run.file_a.original_filename,
+            "file_b_name": run.file_b.original_filename,
+            "mapping_used_file_a": json.dumps(run.file_a.normalization_mapping or {}, sort_keys=True),
+            "mapping_used_file_b": json.dumps(run.file_b.normalization_mapping or {}, sort_keys=True),
+            "status": result.status,
             "confidence_score": result.confidence_score,
             "match_reason": result.match_reason,
+            "exception_type": result.status if result.status in {"amount_variance", "late_settlement", "duplicate_candidate", "manual_review_required"} else "",
+            "file_a_record_id": result.file_a_record_id,
+            "file_a_original_row_number": result.file_a_record.source_row_number if result.file_a_record else None,
+            "file_b_record_id": result.file_b_record_id,
+            "file_b_original_row_number": result.file_b_record.source_row_number if result.file_b_record else None,
             "amount_difference": result.amount_difference,
             "date_difference_days": result.date_difference_days,
+            "approved_by": result.reviewed_by_user_id,
+            "approved_at": result.reviewed_at if result.status == "approved" else None,
+            "review_status": result.status if result.status in {"approved", "rejected"} else "pending",
         }
         for prefix, record in (("file_a", result.file_a_record), ("file_b", result.file_b_record)):
             row.update({
@@ -583,10 +746,24 @@ def export_results(
                 f"{prefix}_reference": record.reference if record else None,
                 f"{prefix}_description": record.description if record else None,
                 f"{prefix}_customer_name": record.customer_name if record else None,
+                f"{prefix}_currency": record.currency if record else None,
             })
+        raw_a = result.file_a_record.raw_data if result.file_a_record else {}
+        raw_b = result.file_b_record.raw_data if result.file_b_record else {}
+        row.update({
+            "file_a_gross_amount": raw_a.get("gross_amount"),
+            "file_a_processor_fee": raw_a.get("processor_fee"),
+            "file_a_net_amount": raw_a.get("net_amount"),
+            "file_a_order_id": raw_a.get("order_id"),
+            "file_a_processor": raw_a.get("processor"),
+            "file_a_payment_status": raw_a.get("status"),
+            "file_b_account_number": raw_b.get("account_number"),
+            "file_b_transaction_type": raw_b.get("transaction_type"),
+            "file_b_bank_description": raw_b.get("description"),
+        })
         writer.writerow({key: neutralize_spreadsheet_formula(value) for key, value in row.items()})
     create_audit_log(
-        db, organization_id=organization.id, user_id=user.id, action="reconciliation_exported",
+        db, organization_id=organization.id, workspace_id=run.workspace_id, user_id=user.id, action="reconciliation_exported",
         entity_type="reconciliation_run", entity_id=run.id,
     )
     increment_export_usage(db, organization.id)

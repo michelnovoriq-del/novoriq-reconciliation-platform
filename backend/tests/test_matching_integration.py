@@ -61,8 +61,8 @@ def test_strict_matching_persists_red_rows_and_exports_csv() -> None:
             )
         )
         assert list(exported[0]) == EXPORT_COLUMNS
-        assert {row["result_status"] for row in exported} == {
-            "matched",
+        assert {row["status"] for row in exported} == {
+            "confident_match",
             "unmatched_file_a",
             "unmatched_file_b",
         }

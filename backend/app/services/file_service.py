@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import NormalizedRecord, Organization, ReconciliationRun, RejectedRecord, UploadedFile, User
+from app.models import MatchResult, NormalizedRecord, Organization, ReconciliationRun, RejectedRecord, UploadedFile, User
 from app.models.base import utc_now
 from app.schemas.file import ColumnMapping
 from app.schemas.rejected_record import RejectedRecordListResponse
@@ -69,6 +69,7 @@ def save_uploaded_file(
     user: User,
     organization: Organization,
     prohibited_data_acknowledged: bool,
+    workspace_id: uuid.UUID | None = None,
 ) -> UploadedFile:
     if not prohibited_data_acknowledged:
         raise HTTPException(
@@ -79,6 +80,11 @@ def save_uploaded_file(
             },
         )
     can_upload_file(db, organization.id)
+    if workspace_id:
+        from app.services.client_workspace_service import get_workspace
+        workspace = get_workspace(db, workspace_id, organization)
+        if workspace.status != "active":
+            raise HTTPException(status_code=400, detail="Choose an active client workspace.")
     settings = get_settings()
     original_filename = upload.filename or "upload.csv"
     validate_upload_metadata(original_filename, upload.content_type)
@@ -124,6 +130,7 @@ def save_uploaded_file(
     uploaded_file = UploadedFile(
         id=file_id,
         organization_id=organization.id,
+        workspace_id=workspace_id,
         uploaded_by_user_id=user.id,
         original_filename=original_filename,
         stored_filename=stored_filename,
@@ -142,6 +149,7 @@ def save_uploaded_file(
         entity_type="uploaded_file",
         entity_id=uploaded_file.id,
         metadata={"original_filename": original_filename},
+        workspace_id=workspace_id,
     )
     db.commit()
     db.refresh(uploaded_file)
@@ -165,6 +173,7 @@ def preview_uploaded_file(
             action="file_previewed",
             entity_type="uploaded_file",
             entity_id=uploaded_file.id,
+            workspace_id=uploaded_file.workspace_id,
         )
         db.commit()
         db.refresh(uploaded_file)
@@ -253,12 +262,46 @@ def normalize_uploaded_file(
     )
 
     try:
-        db.execute(delete(NormalizedRecord).where(NormalizedRecord.uploaded_file_id == file_id))
-        db.execute(delete(RejectedRecord).where(RejectedRecord.uploaded_file_id == file_id))
+        affected_runs = list(
+            db.scalars(
+                select(ReconciliationRun).where(
+                    ReconciliationRun.organization_id == organization.id,
+                    ReconciliationRun.deleted_at.is_(None),
+                    or_(
+                        ReconciliationRun.file_a_id == file_id,
+                        ReconciliationRun.file_b_id == file_id,
+                    ),
+                )
+            )
+        )
+        if affected_runs:
+            db.execute(
+                delete(MatchResult).where(
+                    MatchResult.organization_id == organization.id,
+                    MatchResult.reconciliation_run_id.in_([run.id for run in affected_runs]),
+                )
+            )
+            for run in affected_runs:
+                # Results reference the previous normalized-record version. Resetting
+                # lets the existing run be executed again against the latest mapping.
+                run.status = "created"
+        db.execute(
+            delete(NormalizedRecord).where(
+                NormalizedRecord.uploaded_file_id == file_id,
+                NormalizedRecord.organization_id == organization.id,
+            )
+        )
+        db.execute(
+            delete(RejectedRecord).where(
+                RejectedRecord.uploaded_file_id == file_id,
+                RejectedRecord.organization_id == organization.id,
+            )
+        )
         db.add_all(valid_records)
         db.add_all(rejected_records)
         uploaded_file.row_count = len(rows)
         uploaded_file.status = file_status
+        uploaded_file.normalization_mapping = mapping.model_dump(exclude_none=True)
         uploaded_file.retention_expires_at = utc_now() + timedelta(hours=24)
         increment_upload_usage(db, organization.id, rows_processed=len(rows))
         create_audit_log(
@@ -268,11 +311,14 @@ def normalize_uploaded_file(
             action=action,
             entity_type="uploaded_file",
             entity_id=uploaded_file.id,
+            workspace_id=uploaded_file.workspace_id,
             metadata={
                 "uploaded_file_id": str(uploaded_file.id),
                 "total_rows": len(rows),
                 "valid_rows": valid_count,
                 "rejected_rows": rejected_count,
+                "mapping": mapping.model_dump(),
+                "invalidated_reconciliation_runs": len(affected_runs),
             },
         )
         db.flush()

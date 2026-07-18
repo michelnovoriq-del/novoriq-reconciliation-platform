@@ -7,11 +7,13 @@ from pydantic import BaseModel
 class ReconciliationRunCreate(BaseModel):
     file_a_id: uuid.UUID
     file_b_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
 
 
 class ReconciliationRunResponse(BaseModel):
     id: uuid.UUID
     organization_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
     created_by_user_id: uuid.UUID
     file_a_id: uuid.UUID
     file_b_id: uuid.UUID

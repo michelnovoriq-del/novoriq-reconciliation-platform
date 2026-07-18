@@ -17,6 +17,7 @@ def create_reconciliation_run(
     *,
     file_a_id: uuid.UUID,
     file_b_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
     user: User,
     organization: Organization,
 ) -> ReconciliationRun:
@@ -26,10 +27,16 @@ def create_reconciliation_run(
             detail="Select two different uploaded files.",
         )
     can_create_reconciliation(db, organization.id)
-    get_file_for_org(db, file_a_id, organization.id)
-    get_file_for_org(db, file_b_id, organization.id)
+    file_a = get_file_for_org(db, file_a_id, organization.id)
+    file_b = get_file_for_org(db, file_b_id, organization.id)
+    if workspace_id:
+        from app.services.client_workspace_service import get_workspace
+        get_workspace(db, workspace_id, organization)
+        if file_a.workspace_id != workspace_id or file_b.workspace_id != workspace_id:
+            raise HTTPException(status_code=400, detail="Both files must belong to the selected client workspace.")
     run = ReconciliationRun(
         organization_id=organization.id,
+        workspace_id=workspace_id,
         created_by_user_id=user.id,
         file_a_id=file_a_id,
         file_b_id=file_b_id,
@@ -46,6 +53,7 @@ def create_reconciliation_run(
         entity_type="reconciliation_run",
         entity_id=run.id,
         metadata={"file_a_id": str(file_a_id), "file_b_id": str(file_b_id)},
+        workspace_id=workspace_id,
     )
     db.commit()
     db.refresh(run)

@@ -9,6 +9,7 @@ def create_audit_log(
     db: Session,
     *,
     organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
     user_id: uuid.UUID | None,
     action: str,
     entity_type: str,
@@ -17,6 +18,7 @@ def create_audit_log(
 ) -> AuditLog:
     log = AuditLog(
         organization_id=organization_id,
+        workspace_id=workspace_id,
         user_id=user_id,
         action=action,
         entity_type=entity_type,

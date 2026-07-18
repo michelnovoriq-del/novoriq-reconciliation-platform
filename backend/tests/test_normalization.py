@@ -1,6 +1,8 @@
 from decimal import Decimal
 
 import pytest
+import csv
+from pathlib import Path
 from fastapi import HTTPException
 
 from app.schemas.file import ColumnMapping
@@ -21,6 +23,48 @@ def test_normalize_valid_row() -> None:
     assert result["amount"] == Decimal("1200.50")
     assert result["transaction_date"].isoformat() == "2026-06-22"
     assert result["reference"] == "INV-1"
+
+
+@pytest.mark.parametrize(
+    ("amount_column", "expected"),
+    [("net_amount", "24.37"), ("gross_amount", "24.92")],
+)
+def test_manual_amount_mapping_is_authoritative(amount_column: str, expected: str) -> None:
+    result = normalize_row(
+        {
+            "payment_date": "2026-07-01",
+            "payment_id": "PAY-001",
+            "gross_amount": "24.92",
+            "net_amount": "24.37",
+        },
+        ColumnMapping(
+            date="payment_date",
+            amount=amount_column,
+            reference="payment_id",
+        ),
+    )
+
+    assert str(result["amount"]) == expected
+
+
+def test_supplied_1000_row_fixtures_use_selected_net_and_deposit_amounts() -> None:
+    project_root = Path(__file__).resolve().parents[3]
+    with (project_root / "novoriq_payment_export_1000_rows.csv").open(newline="") as source:
+        payment = next(csv.DictReader(source))
+    with (project_root / "novoriq_bank_statement_1000_rows.csv").open(newline="") as source:
+        bank = next(csv.DictReader(source))
+
+    normalized_payment = normalize_row(payment, ColumnMapping(
+        date="payout_date", amount="net_amount", reference="payout_reference",
+        description="processor", customer_name="customer_name", currency="currency",
+    ))
+    normalized_bank = normalize_row(bank, ColumnMapping(
+        date="value_date", amount="deposit_amount", reference="bank_reference",
+        description="description", currency="currency_code",
+    ))
+
+    assert normalized_payment["amount"] == normalized_bank["amount"]
+    assert normalized_payment["amount"] != parse_money(payment["gross_amount"])
 
 
 @pytest.mark.parametrize(

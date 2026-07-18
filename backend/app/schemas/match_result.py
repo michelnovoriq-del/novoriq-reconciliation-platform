@@ -13,6 +13,7 @@ class MatchResultResponse(BaseModel):
     file_a_record_id: uuid.UUID | None
     file_b_record_id: uuid.UUID | None
     status: str
+    suggested_status: str
     confidence_score: int
     match_reason: str | None
     amount_difference: Decimal | None
@@ -34,6 +35,13 @@ class ReconciliationSummary(BaseModel):
     red_count: int
     approved_count: int
     rejected_count: int
+    confident_count: int = 0
+    possible_count: int = 0
+    amount_variance_count: int = 0
+    late_settlement_count: int = 0
+    duplicate_candidate_count: int = 0
+    unmatched_file_a_count: int = 0
+    unmatched_file_b_count: int = 0
 
 
 class ReconciliationResultsResponse(BaseModel):
@@ -48,6 +56,6 @@ class ReconciliationResultsResponse(BaseModel):
 class MatchActionResponse(BaseModel):
     id: uuid.UUID
     status: str
-    reviewed_at: datetime
+    reviewed_at: datetime | None
 
     model_config = {"from_attributes": True}

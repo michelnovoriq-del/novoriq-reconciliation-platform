@@ -25,6 +25,7 @@ class MatchResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("normalized_records.id"), nullable=True
     )
     status: Mapped[str] = mapped_column(String(50), nullable=False)
+    suggested_status: Mapped[str] = mapped_column(String(50), nullable=False)
     confidence_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     match_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     amount_difference: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
@@ -35,6 +36,9 @@ class MatchResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duplicate_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    duplicate_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     reconciliation_run: Mapped["ReconciliationRun"] = relationship(
         "ReconciliationRun", back_populates="match_results"

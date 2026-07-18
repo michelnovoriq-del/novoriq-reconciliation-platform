@@ -14,6 +14,7 @@ class ReconciliationRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("client_workspaces.id"), nullable=True, index=True)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
@@ -31,6 +32,7 @@ class ReconciliationRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     organization: Mapped["Organization"] = relationship(
         "Organization", back_populates="reconciliation_runs"
     )
+    workspace: Mapped["ClientWorkspace | None"] = relationship("ClientWorkspace")
     created_by_user: Mapped["User"] = relationship(
         "User", back_populates="reconciliation_runs"
     )

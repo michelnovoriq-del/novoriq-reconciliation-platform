@@ -8,7 +8,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import Settings, get_settings
-from app.routes import account, auth, billing, files, health, match_results, reconciliation_runs, webhooks
+from app.routes import account, auth, billing, client_workspaces, files, health, match_results, reconciliation_runs, webhooks
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(auth.router)
     application.include_router(account.router)
     application.include_router(billing.router)
+    application.include_router(client_workspaces.router)
     application.include_router(files.router)
     application.include_router(reconciliation_runs.router)
     application.include_router(match_results.router)

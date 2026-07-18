@@ -12,6 +12,8 @@ from app.schemas.reconciliation_run import (
 )
 from app.schemas.match_result import ReconciliationResultsResponse
 from app.services.matching_service import export_results, get_results, run_matching
+from app.services.workbook_export_service import build_reconciliation_workbook
+from app.services.audit_service import create_audit_log
 from app.services.reconciliation_service import (
     create_reconciliation_run,
     delete_reconciliation_run,
@@ -36,6 +38,7 @@ def create_run(
         db,
         file_a_id=payload.file_a_id,
         file_b_id=payload.file_b_id,
+        workspace_id=payload.workspace_id,
         user=current_user,
         organization=organization,
     )
@@ -77,6 +80,16 @@ def export_run(run_id: uuid.UUID, db: Session = Depends(get_db), current_user: U
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="reconciliation_run_{run_id}.csv"'},
     )
+
+@router.get("/{run_id}/export.xlsx")
+def export_run_workbook(run_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), organization: Organization = Depends(get_active_organization)):
+    run = get_reconciliation_run(db, run_id=run_id, organization=organization)
+    content = build_reconciliation_workbook(db, run=run, organization=organization)
+    create_audit_log(db, organization_id=organization.id, workspace_id=run.workspace_id, user_id=current_user.id, action="reconciliation_workbook_exported", entity_type="reconciliation_run", entity_id=run.id)
+    db.commit()
+    workspace = run.workspace.name if run.workspace_id and getattr(run, "workspace", None) else "Unassigned"
+    safe_workspace = "".join(character if character.isalnum() else "_" for character in workspace).strip("_") or "Unassigned"
+    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="Novoriq_Reconciliation_Report_{safe_workspace}_{run.created_at:%Y-%m}_{str(run.id)[:8]}.xlsx"'})
 
 
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)

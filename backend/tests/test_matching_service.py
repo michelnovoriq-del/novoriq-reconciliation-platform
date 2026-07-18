@@ -35,23 +35,23 @@ def test_exact_amount_near_date_and_reference_is_matched() -> None:
 
     result = score_pair(left, right)
 
-    assert result.status == "matched"
-    assert 85 <= result.confidence_score <= 100
+    assert result.status == "confident_match"
+    assert 95 <= result.confidence_score <= 100
     assert result.amount_difference == Decimal("0.00")
     assert result.date_difference_days == 1
     assert "reference similarity 100%" in result.reason
 
 
-def test_small_fee_difference_is_possible_match() -> None:
+def test_small_fee_difference_is_amount_variance() -> None:
     left = record(amount="75.50", transaction_date=date(2026, 6, 5), reference="INV-003", customer="Delta Studio")
     right = record(amount="72.50", transaction_date=date(2026, 6, 5), reference="INV-003", customer="Delta Studio")
 
     result = score_pair(left, right)
 
-    assert result.status == "possible_match"
+    assert result.status == "amount_variance"
     assert 50 <= result.confidence_score <= 84
     assert result.amount_difference == Decimal("3.00")
-    assert "fee difference" in result.reason
+    assert "Amount variance" in result.reason
 
 
 def test_large_amount_difference_and_weak_reference_is_unmatched() -> None:
@@ -124,7 +124,7 @@ def test_one_file_b_record_is_assigned_once_to_best_candidate() -> None:
     assert len(selected) == 1
     assert selected[0][0] == 1
     assert selected[0][1] == 0
-    assert selected[0][2].status == "matched"
+    assert selected[0][2].status == "confident_match"
 
 
 def test_customer_similarity_alone_does_not_create_possible_match() -> None:
@@ -221,21 +221,19 @@ def test_weak_file_compatibility_requires_exact_amount_or_strong_reference() -> 
     assert "file compatibility is weak" in result.reason
 
 
-def test_export_columns_remain_backward_compatible() -> None:
-    assert EXPORT_COLUMNS == [
-        "result_status",
-        "confidence_score",
-        "match_reason",
-        "amount_difference",
-        "date_difference_days",
-        "file_a_date",
-        "file_a_amount",
-        "file_a_reference",
-        "file_a_description",
-        "file_a_customer_name",
-        "file_b_date",
-        "file_b_amount",
-        "file_b_reference",
-        "file_b_description",
-        "file_b_customer_name",
-    ]
+def test_export_columns_include_accountant_review_evidence() -> None:
+    assert {"run_id", "confidence_score", "match_reason", "exception_type",
+            "amount_difference", "date_difference_days", "file_a_net_amount",
+            "file_a_processor_fee", "file_b_bank_description", "review_status"} <= set(EXPORT_COLUMNS)
+
+
+def test_equally_strong_candidates_are_flagged_as_duplicates() -> None:
+    payment = record(amount="100.00", transaction_date=date(2026, 6, 1), reference="PAY-1")
+    bank_a = record(amount="100.00", transaction_date=date(2026, 6, 1), reference="PAY-1")
+    bank_b = record(amount="100.00", transaction_date=date(2026, 6, 1), reference="PAY-1")
+
+    selected = select_candidate_pairs([payment], [bank_a, bank_b])
+
+    assert len(selected) == 1
+    assert selected[0][2].status == "duplicate_candidate"
+    assert "human review" in selected[0][2].reason

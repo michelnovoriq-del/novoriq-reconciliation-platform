@@ -39,6 +39,7 @@ def list_files(
 def upload_file(
     file: UploadFile = File(...),
     prohibited_data_acknowledged: bool = Form(False),
+    workspace_id: uuid.UUID | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     organization: Organization = Depends(get_active_organization),
@@ -55,6 +56,7 @@ def upload_file(
         user=current_user,
         organization=organization,
         prohibited_data_acknowledged=prohibited_data_acknowledged,
+        workspace_id=workspace_id,
     )
 
 

@@ -9,12 +9,14 @@ from app.schemas.rejected_record import RejectedRecordResponse
 class UploadedFileResponse(BaseModel):
     id: uuid.UUID
     organization_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
     uploaded_by_user_id: uuid.UUID
     original_filename: str
     stored_filename: str
     file_type: str
     row_count: int | None = None
     status: str
+    normalization_mapping: dict | None = None
     created_at: datetime
     updated_at: datetime
 
