@@ -728,7 +728,12 @@ def export_results(
             "status": result.status,
             "confidence_score": result.confidence_score,
             "match_reason": result.match_reason,
-            "exception_type": result.status if result.status in {"amount_variance", "late_settlement", "duplicate_candidate", "manual_review_required"} else "",
+            "exception_type": {
+                "possible_match": "unclear_reference", "amount_variance": "amount_variance",
+                "late_settlement": "late_settlement", "duplicate_candidate": "duplicate_candidate",
+                "manual_review_required": "manual_review_required", "unmatched_file_a": "unmatched_payment",
+                "unmatched_file_b": "unmatched_bank_deposit",
+            }.get(result.suggested_status, ""),
             "file_a_record_id": result.file_a_record_id,
             "file_a_original_row_number": result.file_a_record.source_row_number if result.file_a_record else None,
             "file_b_record_id": result.file_b_record_id,

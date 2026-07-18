@@ -12,7 +12,7 @@ from app.schemas.reconciliation_run import (
 )
 from app.schemas.match_result import ReconciliationResultsResponse
 from app.services.matching_service import export_results, get_results, run_matching
-from app.services.workbook_export_service import build_reconciliation_workbook
+from app.services.workbook_export_service import build_reconciliation_workbook, build_workbook_filename
 from app.services.audit_service import create_audit_log
 from app.services.reconciliation_service import (
     create_reconciliation_run,
@@ -88,8 +88,8 @@ def export_run_workbook(run_id: uuid.UUID, db: Session = Depends(get_db), curren
     create_audit_log(db, organization_id=organization.id, workspace_id=run.workspace_id, user_id=current_user.id, action="reconciliation_workbook_exported", entity_type="reconciliation_run", entity_id=run.id)
     db.commit()
     workspace = run.workspace.name if run.workspace_id and getattr(run, "workspace", None) else "Unassigned"
-    safe_workspace = "".join(character if character.isalnum() else "_" for character in workspace).strip("_") or "Unassigned"
-    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="Novoriq_Reconciliation_Report_{safe_workspace}_{run.created_at:%Y-%m}_{str(run.id)[:8]}.xlsx"'})
+    filename = build_workbook_filename(db, run=run, workspace_name=workspace if workspace != "Unassigned" else None)
+    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
