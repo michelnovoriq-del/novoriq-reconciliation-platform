@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 
 from app.models import ClientWorkspace, MatchResult, NormalizedRecord, Organization, ReconciliationRun, UploadedFile, User
 from app.services.workbook_export_service import _exception_type, _recommended, build_reconciliation_workbook, build_workbook_filename
+from app.routes import reconciliation_runs as reconciliation_routes
 
 SHEETS = ["Summary","Suggested Confident Matches","Approved Matches","Exceptions","Unmatched Payment Rows","Unmatched Bank Rows","Mapping Audit","Invalid Rows"]
 
@@ -67,3 +68,17 @@ def test_review_categories_have_explicit_exception_types_and_actions():
     assert _exception_type("unmatched_file_b")=="unmatched_bank_deposit"
     for status in ("possible_match","amount_variance","late_settlement","duplicate_candidate","unmatched_file_a","unmatched_file_b"):
         assert _recommended(status)
+
+def test_live_export_route_returns_corrected_workbook_and_filename(monkeypatch):
+    db,organization,workspace,run,result=fixture_objects()
+    run.workspace=workspace
+    monkeypatch.setattr("app.services.workbook_export_service._load_results",lambda *args,**kwargs:[result])
+    monkeypatch.setattr(reconciliation_routes,"get_reconciliation_run",lambda *args,**kwargs:run)
+
+    response=reconciliation_routes.export_run_workbook(run.id,db=db,current_user=User(id=run.created_by_user_id,email="owner@example.com",hashed_password="x"),organization=organization)
+    workbook=load_workbook(io.BytesIO(response.body))
+
+    assert workbook.sheetnames==SHEETS
+    assert workbook["Suggested Confident Matches"].max_row==2
+    assert response.headers["x-novoriq-workbook-layout"]=="2"
+    assert f"Demo_Ecommerce_Client_2026-07_{str(run.id)[:8]}.xlsx" in response.headers["content-disposition"]

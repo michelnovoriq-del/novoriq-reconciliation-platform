@@ -89,7 +89,10 @@ def export_run_workbook(run_id: uuid.UUID, db: Session = Depends(get_db), curren
     db.commit()
     workspace = run.workspace.name if run.workspace_id and getattr(run, "workspace", None) else "Unassigned"
     filename = build_workbook_filename(db, run=run, workspace_name=workspace if workspace != "Unassigned" else None)
-    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Novoriq-Workbook-Layout": "2",
+    })
 
 
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)

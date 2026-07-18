@@ -74,7 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=False,  # Authentication is Authorization bearer-token based.
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Request-ID"],
-        expose_headers=["X-Request-ID"],
+        expose_headers=["X-Request-ID", "Content-Disposition", "X-Novoriq-Workbook-Layout"],
         max_age=600,
     )
     return application
