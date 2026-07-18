@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,10 @@ class UploadedFile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="uploaded", nullable=False)
     normalization_mapping: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    file_role: Mapped[str] = mapped_column(String(50), default="unknown", nullable=False)
+    detected_file_role: Mapped[str] = mapped_column(String(50), default="unknown", nullable=False)
+    file_role_confidence: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    file_role_signals: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     retention_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     storage_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

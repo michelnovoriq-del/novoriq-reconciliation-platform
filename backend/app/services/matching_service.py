@@ -56,6 +56,12 @@ EXPORT_COLUMNS = [
     "file_b_name",
     "mapping_used_file_a",
     "mapping_used_file_b",
+    "payment_file_name",
+    "bank_file_name",
+    "payment_file_role",
+    "bank_file_role",
+    "payment_amount_used_column",
+    "bank_amount_used_column",
     "status",
     "confidence_score",
     "match_reason",
@@ -718,6 +724,8 @@ def export_results(
     writer = csv.DictWriter(output, fieldnames=EXPORT_COLUMNS)
     writer.writeheader()
     for result in results:
+        reversed_roles = run.file_a_role == "bank_statement" and run.file_b_role == "payment_export"
+        payment_file, bank_file = (run.file_b, run.file_a) if reversed_roles else (run.file_a, run.file_b)
         row = {
             "run_id": run.id,
             "created_at": result.created_at,
@@ -725,6 +733,12 @@ def export_results(
             "file_b_name": run.file_b.original_filename,
             "mapping_used_file_a": json.dumps(run.file_a.normalization_mapping or {}, sort_keys=True),
             "mapping_used_file_b": json.dumps(run.file_b.normalization_mapping or {}, sort_keys=True),
+            "payment_file_name": payment_file.original_filename,
+            "bank_file_name": bank_file.original_filename,
+            "payment_file_role": payment_file.file_role,
+            "bank_file_role": bank_file.file_role,
+            "payment_amount_used_column": (payment_file.normalization_mapping or {}).get("amount"),
+            "bank_amount_used_column": (bank_file.normalization_mapping or {}).get("amount"),
             "status": result.status,
             "confidence_score": result.confidence_score,
             "match_reason": result.match_reason,

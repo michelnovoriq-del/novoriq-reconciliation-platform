@@ -18,6 +18,8 @@ def create_reconciliation_run(
     file_a_id: uuid.UUID,
     file_b_id: uuid.UUID,
     workspace_id: uuid.UUID | None = None,
+    role_override_confirmed: bool = False,
+    role_override_reason: str | None = None,
     user: User,
     organization: Organization,
 ) -> ReconciliationRun:
@@ -34,6 +36,10 @@ def create_reconciliation_run(
         get_workspace(db, workspace_id, organization)
         if file_a.workspace_id != workspace_id or file_b.workspace_id != workspace_id:
             raise HTTPException(status_code=400, detail="Both files must belong to the selected client workspace.")
+    reversed_roles=file_a.file_role=="bank_statement" or file_b.file_role=="payment_export"
+    same_known_role=file_a.file_role==file_b.file_role and file_a.file_role!="unknown"
+    if (reversed_roles or same_known_role) and not role_override_confirmed:
+        raise HTTPException(status_code=409,detail={"code":"FILE_ROLES_REVERSED","message":"These files may be reversed. Select a payment export first and a bank statement second, or explicitly confirm your selection.","suggested_file_a_id":str(file_b.id) if reversed_roles else None,"suggested_file_b_id":str(file_a.id) if reversed_roles else None})
     run = ReconciliationRun(
         organization_id=organization.id,
         workspace_id=workspace_id,
@@ -41,6 +47,10 @@ def create_reconciliation_run(
         file_a_id=file_a_id,
         file_b_id=file_b_id,
         status="created",
+        file_a_role=file_a.file_role,
+        file_b_role=file_b.file_role,
+        role_override_confirmed=role_override_confirmed,
+        role_override_reason=role_override_reason,
     )
     db.add(run)
     db.flush()
@@ -52,7 +62,7 @@ def create_reconciliation_run(
         action="reconciliation_run_created",
         entity_type="reconciliation_run",
         entity_id=run.id,
-        metadata={"file_a_id": str(file_a_id), "file_b_id": str(file_b_id)},
+        metadata={"file_a_id":str(file_a_id),"file_b_id":str(file_b_id),"file_a_role":file_a.file_role,"file_b_role":file_b.file_role,"role_override_confirmed":role_override_confirmed,"role_override_reason":role_override_reason},
         workspace_id=workspace_id,
     )
     db.commit()

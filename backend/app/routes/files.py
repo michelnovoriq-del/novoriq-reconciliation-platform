@@ -12,6 +12,7 @@ from app.schemas.file import (
     FilePreviewResponse,
     NormalizeFileResponse,
     UploadedFileResponse,
+    FileRoleUpdate,
 )
 from app.schemas.rejected_record import RejectedRecordListResponse
 from app.services.file_service import (
@@ -21,10 +22,15 @@ from app.services.file_service import (
     preview_uploaded_file,
     save_uploaded_file,
     delete_uploaded_file,
+    update_file_role,
 )
 
 
 router = APIRouter(prefix="/files", tags=["files"])
+
+@router.patch("/{file_id}/role", response_model=UploadedFileResponse)
+def change_role(file_id: uuid.UUID, payload: FileRoleUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), organization: Organization = Depends(get_active_organization)):
+    return update_file_role(db,file_id=file_id,file_role=payload.file_role,user=current_user,organization=organization)
 
 
 @router.get("", response_model=list[UploadedFileResponse])

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.rejected_record import RejectedRecordResponse
 
@@ -17,6 +17,10 @@ class UploadedFileResponse(BaseModel):
     row_count: int | None = None
     status: str
     normalization_mapping: dict | None = None
+    file_role: str = "unknown"
+    detected_file_role: str = "unknown"
+    file_role_confidence: float = 0
+    file_role_signals: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -46,3 +50,6 @@ class NormalizeFileResponse(BaseModel):
     rejected_rows: int
     rejected_examples: list[RejectedRecordResponse]
     message: str
+
+class FileRoleUpdate(BaseModel):
+    file_role: str

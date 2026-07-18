@@ -80,6 +80,8 @@ def build_reconciliation_workbook(db: Session, *, run: ReconciliationRun, organi
     workspace = db.get(ClientWorkspace, run.workspace_id) if run.workspace_id else None
     creator = db.get(User, run.created_by_user_id)
     rejected = list(db.scalars(select(RejectedRecord).where(RejectedRecord.organization_id == organization.id, RejectedRecord.uploaded_file_id.in_([run.file_a_id, run.file_b_id]))))
+    reversed_roles = run.file_a_role == "bank_statement" and run.file_b_role == "payment_export"
+    payment_file, bank_file = (run.file_b, run.file_a) if reversed_roles else (run.file_a, run.file_b)
     suggested_counts = {status: sum(item.suggested_status == status for item in results) for status in {item.suggested_status for item in results}}
     suggested_confident = sum(item.suggested_status == "confident_match" for item in results)
     approved_count = sum(item.status == "approved" for item in results)
@@ -91,9 +93,11 @@ def build_reconciliation_workbook(db: Session, *, run: ReconciliationRun, organi
     summary_rows = [
         ("Client / Workspace", workspace.name if workspace else "Unassigned"), ("Organization", organization.name), ("Run ID", str(run.id)),
         ("Created At", run.created_at), ("Created By", creator.email if creator else str(run.created_by_user_id)), ("Review Status", "reviewed" if any(x.reviewed_at for x in results) else "pending_review"),
-        ("Payment File", run.file_a.original_filename), ("Bank File", run.file_b.original_filename),
-        ("Payment Mapping Used", run.file_a.normalization_mapping or {}), ("Bank Mapping Used", run.file_b.normalization_mapping or {}),
-        ("Total Payment Rows", run.file_a.row_count or 0), ("Total Bank Rows", run.file_b.row_count or 0), ("Total Rows Processed", (run.file_a.row_count or 0) + (run.file_b.row_count or 0)),
+        ("Payment Export File", payment_file.original_filename), ("Bank Statement File", bank_file.original_filename),
+        ("Payment Amount Used", (payment_file.normalization_mapping or {}).get("amount","unknown")), ("Bank Amount Used", (bank_file.normalization_mapping or {}).get("amount","unknown")),
+        ("Role Override", "Yes" if run.role_override_confirmed else "No"), ("Role Override Note", run.role_override_reason or ""),
+        ("Payment Mapping Used", payment_file.normalization_mapping or {}), ("Bank Mapping Used", bank_file.normalization_mapping or {}),
+        ("Total Payment Rows", payment_file.row_count or 0), ("Total Bank Rows", bank_file.row_count or 0), ("Total Rows Processed", (payment_file.row_count or 0) + (bank_file.row_count or 0)),
         ("Suggested Confident Matches", suggested_confident), ("Approved Matches", approved_count), ("Pending Confident Matches", pending_confident), ("Pending Review", pending_review), ("Exceptions", exception_count), ("Possible Matches", sum(item.suggested_status == "possible_match" for item in results)),
         ("Amount Variances", suggested_counts.get("amount_variance", 0)), ("Late Settlements", suggested_counts.get("late_settlement", 0)), ("Duplicate Candidates", suggested_counts.get("duplicate_candidate", 0)),
         ("Unmatched Payment Rows", suggested_counts.get("unmatched_file_a", 0)), ("Unmatched Bank Rows", suggested_counts.get("unmatched_file_b", 0)), ("Invalid Rows", len(rejected)),
@@ -106,7 +110,7 @@ def build_reconciliation_workbook(db: Session, *, run: ReconciliationRun, organi
 
     match_headers = ["match_id","status","suggested_status","review_status","confidence_score","match_reason","recommended_action","payment_row_number","payment_date","payment_reference","payment_order_id","payment_customer_name","payment_processor","payment_gross_amount","payment_processor_fee","payment_net_amount","payment_amount_used","payment_currency","payment_status","bank_row_number","bank_date","bank_reference","bank_description","bank_amount","bank_currency","bank_account_number","bank_transaction_type","amount_difference","date_difference_days","approved_by","approved_at","reviewed_by","reviewed_at","review_notes"]
     def match_row(item):
-        a=item.file_a_record; b=item.file_b_record; ar=a.raw_data if a else {}; br=b.raw_data if b else {}
+        a,b=(item.file_b_record,item.file_a_record) if reversed_roles else (item.file_a_record,item.file_b_record); ar=a.raw_data if a else {}; br=b.raw_data if b else {}
         review_status="approved" if item.status=="approved" else "rejected" if item.status=="rejected" else "pending_review"
         return [item.id,item.status,item.suggested_status,review_status,item.confidence_score,item.match_reason,"Approve after confirming the source evidence.",a.source_row_number if a else None,a.transaction_date if a else None,a.reference if a else None,ar.get("order_id"),a.customer_name if a else None,ar.get("processor"),parse_money(ar.get("gross_amount")),parse_money(ar.get("processor_fee")),parse_money(ar.get("net_amount")),a.amount if a else None,a.currency if a else None,ar.get("status"),b.source_row_number if b else None,b.transaction_date if b else None,b.reference if b else None,b.description if b else None,b.amount if b else None,b.currency if b else None,br.get("account_number"),br.get("transaction_type"),item.amount_difference,item.date_difference_days,item.reviewed_by_user_id if item.status=="approved" else None,item.reviewed_at if item.status=="approved" else None,item.reviewed_by_user_id,item.reviewed_at,item.review_notes]
     suggested = workbook.create_sheet("Suggested Confident Matches"); _table(suggested, match_headers, (match_row(x) for x in results if x.suggested_status == "confident_match"))
@@ -128,8 +132,8 @@ def build_reconciliation_workbook(db: Session, *, run: ReconciliationRun, organi
                 record=getattr(x,side); yield [record.id,record.source_row_number,record.transaction_date,record.reference,record.description,record.amount,record.currency,x.match_reason,_recommended(status),"reviewed_unmatched" if x.status=="reviewed_unmatched" else "pending_review",x.reviewed_by_user_id,x.reviewed_at,x.review_notes]
         _table(sheet,unmatched_headers,rows())
 
-    mapping=workbook.create_sheet("Mapping Audit"); mapping_headers=["file_id","file_name","file_type","uploaded_at","mapped_date_column","mapped_amount_column","mapped_reference_column","mapped_description_column","mapped_currency_column","mapped_customer_column","normalized_row_count","mapping_source","mapping_json"]
-    _table(mapping,mapping_headers,([f.id,f.original_filename,f.file_type,f.created_at,(f.normalization_mapping or {}).get("date"),(f.normalization_mapping or {}).get("amount"),(f.normalization_mapping or {}).get("reference"),(f.normalization_mapping or {}).get("description"),(f.normalization_mapping or {}).get("currency"),(f.normalization_mapping or {}).get("customer_name"),f.row_count,"manual_or_suggested",f.normalization_mapping or {}] for f in (run.file_a,run.file_b)))
+    mapping=workbook.create_sheet("Mapping Audit"); mapping_headers=["file_id","file_name","file_role","detected_file_role","role_confidence","file_type","uploaded_at","mapped_date_column","mapped_amount_column","mapped_reference_column","mapped_description_column","mapped_currency_column","mapped_customer_column","normalized_row_count","mapping_source","mapping_json"]
+    _table(mapping,mapping_headers,([f.id,f.original_filename,f.file_role,f.detected_file_role,f.file_role_confidence,f.file_type,f.created_at,(f.normalization_mapping or {}).get("date"),(f.normalization_mapping or {}).get("amount"),(f.normalization_mapping or {}).get("reference"),(f.normalization_mapping or {}).get("description"),(f.normalization_mapping or {}).get("currency"),(f.normalization_mapping or {}).get("customer_name"),f.row_count,"manual_or_suggested",f.normalization_mapping or {}] for f in (payment_file,bank_file)))
     invalid=workbook.create_sheet("Invalid Rows"); invalid_headers=["file_id","file_name","row_number","field_name","raw_value","error_reason","recommended_fix","created_at"]
     file_names={run.file_a_id:run.file_a.original_filename,run.file_b_id:run.file_b.original_filename}; invalid_rows=[]
     for item in rejected:

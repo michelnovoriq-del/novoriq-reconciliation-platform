@@ -18,6 +18,7 @@ from app.services.normalizer_service import RowNormalizationError, normalize_row
 from app.services.parser_service import count_rows, preview_file, read_file
 from app.services.storage import get_storage_backend
 from app.services.upload_safety import detect_prohibited_sensitive_data, validate_upload_metadata
+from app.services.file_role_service import VALID_FILE_ROLES, detect_file_role
 from app.services.usage_service import increment_upload_usage
 
 
@@ -122,6 +123,13 @@ def save_uploaded_file(
             },
         )
 
+    try:
+        detected_columns, _ = preview_file(temp_path)
+        role_detection = detect_file_role(detected_columns)
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Could not inspect uploaded file: {exc}") from exc
+
     file_id = uuid.uuid4()
     stored_filename = f"{file_id}{Path(original_filename).suffix.lower()}"
     object_key = f"organizations/{organization.id}/uploads/{file_id}/{uuid.uuid4()}{Path(original_filename).suffix.lower()}"
@@ -137,6 +145,10 @@ def save_uploaded_file(
         file_path=str(file_path),
         file_type=file_type,
         status="uploaded",
+        file_role=role_detection.detected_role,
+        detected_file_role=role_detection.detected_role,
+        file_role_confidence=role_detection.confidence,
+        file_role_signals=role_detection.signals,
         retention_expires_at=utc_now() + timedelta(hours=24),
     )
     db.add(uploaded_file)
@@ -148,12 +160,29 @@ def save_uploaded_file(
         action="file_uploaded",
         entity_type="uploaded_file",
         entity_id=uploaded_file.id,
-        metadata={"original_filename": original_filename},
+        metadata={"original_filename": original_filename, "detected_role": role_detection.detected_role, "confidence": role_detection.confidence, "signals": role_detection.signals},
+        workspace_id=workspace_id,
+    )
+    create_audit_log(
+        db,
+        organization_id=organization.id,
+        user_id=user.id,
+        action="file_role_detected",
+        entity_type="uploaded_file",
+        entity_id=uploaded_file.id,
+        metadata={"detected_role": role_detection.detected_role, "confidence": role_detection.confidence, "signals": role_detection.signals},
         workspace_id=workspace_id,
     )
     db.commit()
     db.refresh(uploaded_file)
     return uploaded_file
+
+def update_file_role(db: Session, *, file_id: uuid.UUID, file_role: str, user: User, organization: Organization) -> UploadedFile:
+    if file_role not in VALID_FILE_ROLES:
+        raise HTTPException(status_code=400, detail="Choose Payment Export, Bank Statement, or Unknown.")
+    uploaded_file=get_file_for_org(db,file_id,organization.id); previous=uploaded_file.file_role; uploaded_file.file_role=file_role
+    create_audit_log(db,organization_id=organization.id,workspace_id=uploaded_file.workspace_id,user_id=user.id,action="file_role_changed",entity_type="uploaded_file",entity_id=uploaded_file.id,metadata={"previous_role":previous,"new_role":file_role,"detected_role":uploaded_file.detected_file_role,"confidence":uploaded_file.file_role_confidence})
+    db.commit();db.refresh(uploaded_file);return uploaded_file
 
 
 def preview_uploaded_file(

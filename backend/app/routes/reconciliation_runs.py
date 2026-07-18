@@ -39,6 +39,8 @@ def create_run(
         file_a_id=payload.file_a_id,
         file_b_id=payload.file_b_id,
         workspace_id=payload.workspace_id,
+        role_override_confirmed=payload.role_override_confirmed,
+        role_override_reason=payload.role_override_reason,
         user=current_user,
         organization=organization,
     )

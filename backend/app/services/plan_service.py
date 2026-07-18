@@ -12,9 +12,9 @@ PLAN_DEFINITIONS = {
     "free": {
         "name": "Free Forever",
         "monthly_price_usd": Decimal("0.00"),
-        "monthly_run_limit": 2,
+        "monthly_run_limit": 10,
         "max_files_per_run": 2,
-        "max_rows_per_file": 2500,
+        "max_rows_per_file": 1000,
         "max_users": 1,
         "max_client_workspaces": 1,
         "detailed_retention_days": 7,

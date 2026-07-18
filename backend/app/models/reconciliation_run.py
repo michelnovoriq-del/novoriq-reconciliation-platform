@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,10 @@ class ReconciliationRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("uploaded_files.id"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(50), default="created", nullable=False)
+    file_a_role: Mapped[str] = mapped_column(String(50), default="unknown", nullable=False)
+    file_b_role: Mapped[str] = mapped_column(String(50), default="unknown", nullable=False)
+    role_override_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    role_override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     retention_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     data_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
