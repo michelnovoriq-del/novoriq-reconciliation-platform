@@ -1,7 +1,16 @@
-from fastapi import APIRouter, Depends
+import json
+from typing import Literal
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request as UrlRequest, urlopen
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_active_organization, get_current_user
 from app.models import Organization, OrganizationSubscription, PendingWhopMembershipLink, User, WhopMembershipLink
@@ -75,3 +84,85 @@ def sync_whop_access(
     organization: Organization = Depends(get_active_organization),
 ) -> BillingStatusResponse:
     return billing_status(db=db, current_user=current_user, organization=organization)
+
+
+class WhopCheckoutRequest(BaseModel):
+    plan_code: Literal["professional", "firm", "enterprise"]
+
+
+class WhopCheckoutResponse(BaseModel):
+    purchase_url: str
+
+
+@router.post("/checkout", response_model=WhopCheckoutResponse)
+def create_whop_checkout(
+    payload: WhopCheckoutRequest,
+    current_user: User = Depends(get_current_user),
+    organization: Organization = Depends(get_active_organization),
+) -> WhopCheckoutResponse:
+    """Return the configured Whop hosted checkout URL for a paid plan."""
+    settings = get_settings()
+
+    if not settings.whop_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Checkout is not configured. Please contact support.",
+        )
+
+    plan_ids = {
+        "professional": settings.whop_professional_plan_id,
+        "firm": settings.whop_firm_plan_id,
+        "enterprise": settings.whop_enterprise_plan_id,
+    }
+    plan_id = plan_ids[payload.plan_code]
+
+    if not plan_id:
+        raise HTTPException(
+            status_code=503,
+            detail="This plan is not configured for checkout.",
+        )
+
+    request = UrlRequest(
+        f"{settings.whop_api_base_url.rstrip('/')}/plans/{plan_id}",
+        headers={
+            "Authorization": f"Bearer {settings.whop_api_key}",
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Whop could not provide checkout. Please try again.",
+        ) from exc
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not connect to Whop. Please try again.",
+        ) from exc
+
+    purchase_url = result.get("purchase_url") if isinstance(result, dict) else None
+
+    if not isinstance(purchase_url, str):
+        raise HTTPException(
+            status_code=502,
+            detail="Whop did not return a checkout URL.",
+        )
+
+    parsed_url = urlparse(purchase_url)
+    host = (parsed_url.hostname or "").lower()
+
+    if (
+        parsed_url.scheme != "https"
+        or not (host == "whop.com" or host.endswith(".whop.com"))
+    ):
+        raise HTTPException(
+            status_code=502,
+            detail="Whop returned an invalid checkout URL.",
+        )
+
+    return WhopCheckoutResponse(purchase_url=purchase_url)
